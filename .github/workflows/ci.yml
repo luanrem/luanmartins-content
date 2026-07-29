@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  # Sem filtro de branch na PR: on.pull_request.branches filtra pela branch BASE.
+  pull_request:
+  push:
+    branches: [main]
+
+# Push novo na mesma branch cancela a execucao anterior. Em main isso tambem
+# vale para o publish: em dois merges seguidos, o segundo build ja carrega o
+# conteudo dos dois.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Antes do setup-node: o cache do pnpm precisa do binario no PATH para
+      # resolver o store, e a versao sai do packageManager do package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # O esbuild que a velite usa para compilar o velite.config.mts nao checa
+      # tipo nenhum. Sem este passo, erro de tipo no schema so apareceria como
+      # comportamento errado em runtime.
+      - run: pnpm typecheck
+
+      # O --strict vive dentro do script. Sem ele a velite descarta o item
+      # invalido com um aviso e termina verde — um texto sumindo do site sem
+      # ninguem perceber.
+      - run: pnpm build
+
+  publish:
+    # Merge e o botao de publicar: so depois do verde, e so em main. Isto
+    # precisa morar no mesmo workflow que o verify, porque `needs` nao
+    # atravessa arquivos — em dois workflows separados o hook dispararia em
+    # paralelo com a validacao, mandando conteudo quebrado para o build.
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Nao faz checkout e nao fala com a API do GitHub.
+    permissions: {}
+    steps:
+      - name: Disparar o build do site na Vercel
+        env:
+          DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::error::o secret VERCEL_DEPLOY_HOOK nao esta configurado"
+            exit 1
+          fi
+          # --fail faz 4xx/5xx virar job vermelho em vez de silencio; a URL
+          # nunca e impressa.
+          curl --fail --silent --show-error --request POST "$DEPLOY_HOOK" --output /dev/null
