@@ -1,0 +1,12 @@
+allowBuilds:
+  # a velite compila o velite.config.mts com esbuild, que baixa o binario da
+  # plataforma num postinstall
+  esbuild: true
+  # processamento de imagem do s.image(), que gera o placeholder de blur
+  sharp: true
+
+# Mesmo motivo do repositorio do site: a sharp que a velite fixa herda CVEs da
+# libvips. O bump e de minor dentro da mesma major.
+#   sharp  0.34.x -> 0.35.3
+overrides:
+  sharp: ^0.35.3

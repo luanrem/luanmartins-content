@@ -1,0 +1,8 @@
+# O unico dado solto do site que nao e texto longo e nao pode ficar hardcoded
+# num componente.
+#
+# O PDF do curriculo e hospedado FORA deste repositorio de proposito: aqui e
+# publico e o historico do Git e permanente, entao qualquer versao antiga do
+# arquivo — com os dados pessoais que ela carregasse — ficaria rastreavel para
+# sempre, mesmo depois de substituida. Aqui mora so o link.
+resumeUrl: "https://luanmartins.com/cv/luan-martins-resume.pdf"

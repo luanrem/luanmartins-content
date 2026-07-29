@@ -1,0 +1,61 @@
+---
+title: The classifier that quietly stopped working
+description: An LLM scoring the same input differently across model versions is not a bug you get an error for. Here is how I found it, and what I changed so the next one is loud.
+slug: llm-classification-drift
+date: 2026-07-02
+tags: [ai, automation]
+relatedWork: [hermes]
+---
+
+For about three weeks my job-alert pipeline was worse than useless, and every
+part of it reported success the whole time.
+
+## The symptom
+
+Fewer alerts. Not zero — that I would have noticed. Just fewer, in a way that
+was entirely consistent with a slow month. Scrapers reported normal counts. The
+database was filling up. Nothing errored.
+
+What eventually got my attention was a listing I saw somewhere else and knew
+should have scored high. I went to look at why it had not.
+
+## What was happening
+
+The classification prompt asks a model to score a listing against a rubric and
+return a number with a one-line reason. It had been returning sane numbers for
+months. Then the underlying model changed — same alias, different weights — and
+the score distribution shifted down by roughly fifteen points.
+
+Nothing about that is an error. The model was still returning a valid number.
+Everything downstream was still working perfectly on a number that no longer
+meant what the threshold assumed it meant.
+
+## Why the history saved me
+
+The one thing I had done right was to store every classification: the listing,
+the score, the reason, and the model identifier. That table is what turned a
+vague feeling into a chart. Scores against the same rubric, plotted over time,
+with a very visible step down on a specific date.
+
+Without that table I would have had a suspicion and no way to test it.
+
+## What changed
+
+**The model is pinned to an explicit version.** The alias was the whole problem —
+it silently pointed at something new. Convenience that changes behavior without
+telling you is not convenience.
+
+**A small set of listings is scored on every run as a canary.** They never
+change, so their score should not either. When it moves more than a few points,
+the run fails loudly instead of quietly filtering differently.
+
+**The threshold is derived, not hardcoded.** It now floats against the canary
+distribution, so a uniform shift stops silently changing what gets through.
+
+## The thing I keep relearning
+
+Systems that involve a model fail in a mode that ordinary monitoring does not
+have a name for: **everything is up, everything is fast, and the answers got
+worse.** Uptime checks cannot see it. Error rates cannot see it. The only thing
+that sees it is a record of what the system used to say, kept around long enough
+to compare against.

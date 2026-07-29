@@ -1,0 +1,57 @@
+---
+title: I rebuilt my homelab from zero, on purpose
+description: The first version worked and I was afraid to touch it. Rewriting it as infrastructure as code cost a weekend and bought back the ability to change my mind.
+slug: rebuilding-the-homelab
+date: 2026-05-20
+tags: [infrastructure, testing]
+relatedWork: [homelab]
+---
+
+My homelab worked. Twelve services, up for months, doing exactly what I set them
+up to do. I tore the whole thing down anyway.
+
+## Why tear down something that works
+
+Because "works" was doing a lot of hiding.
+
+It had been assembled by hand over about two years. Every service was configured
+in the moment, with decisions that made sense at the time and were never written
+down anywhere. Which meant that changing anything started the same way: open the
+config files and try to reconstruct what past-me had been thinking.
+
+That is a system that works and cannot be changed. And a system I am afraid to
+change is one I stop maintaining — I had already caught myself avoiding an
+upgrade because I was not confident I could put it back.
+
+## The rule
+
+One rule, and it decided everything else: **if it is not in a repository, it
+does not exist.**
+
+Proxmox underneath. Terraform describing the machines. Ansible configuring them.
+Traefik handling TLS and routing. Tailscale for access, so nothing is exposed to
+the open internet and there is no port-forwarding rule to get subtly wrong.
+
+## What it actually cost
+
+More than a weekend, if I am honest. The infrastructure came up quickly. What
+took the time was the long tail — the one service with a hand-tuned config
+nobody remembers writing, the certificate that turned out to be renewed by a
+cron job on a machine that was not supposed to matter.
+
+Finding those was most of the value. They were exactly the things that would
+have broken during a real recovery, at the worst possible moment.
+
+## What I got back
+
+Recreating a service is a command. Upgrades are testable, because I can stand up
+a copy, break it, and throw it away. And the part I underestimated: I stopped
+being careful. Not careless — just no longer treating the machines as fragile
+things to be worked around.
+
+## What I got wrong
+
+Backups came last. There was a stretch of a few weeks where the infrastructure
+was fully reproducible and the data inside it was not, which is genuinely the
+worst configuration of the two — because everything about it feels safe. The
+machines could come back; what they held could not.

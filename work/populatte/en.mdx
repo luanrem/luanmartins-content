@@ -1,0 +1,40 @@
+---
+title: Populatte
+subtitle: Persistent form-fill mapping
+headline: A B2B Chrome extension for persistent form-fill mapping.
+slug: populatte
+kind: overview
+status:
+  text: Private beta
+  tone: idle
+order: 3
+featured: true
+tags: [frontend, automation]
+stack: [chrome-extension, typescript, react]
+updatedAt: 2026-05-15
+---
+
+## The problem
+
+Some teams spend their day copying the same record into the same three internal
+systems. The forms never match: different field names, different order, one of
+them split across two steps. Generic autofill gives up immediately, because it
+matches on field names that only agree by accident.
+
+## The approach
+
+Populatte lets a person map it once. You point at a source, point at the target
+fields, and the mapping is saved for that site — so the second time is a click
+instead of twenty.
+
+It lives in the Chrome Side Panel API rather than a popup, which matters more
+than it sounds: a popup closes the moment you click into the page, which is
+exactly when you need it open.
+
+## Where it stands
+
+Private beta with a handful of teams. The interesting problems so far have been
+about durability rather than features — forms change, and a mapping that
+silently points at a field that no longer exists is worse than no mapping at
+all. Detecting that and asking, instead of writing to the wrong place, is most
+of what the current work is about.
