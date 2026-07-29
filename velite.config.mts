@@ -309,9 +309,9 @@ const work = defineCollection({
     }),
 });
 
-const blog = defineCollection({
+const log = defineCollection({
   name: "Post",
-  pattern: "blog/*/*.mdx",
+  pattern: "log/*/*.mdx",
   schema: s
     .object({
       title: s.string().min(6).max(90),
@@ -421,7 +421,7 @@ export default defineConfig({
     clean: false,
   },
 
-  collections: { experience, work, blog, site },
+  collections: { experience, work, log, site },
 
   prepare: (data) => {
     const problems: string[] = [];
@@ -432,7 +432,7 @@ export default defineConfig({
     const collections: ReadonlyArray<[string, readonly Localized[]]> = [
       ["experience", data.experience],
       ["work", data.work],
-      ["blog", data.blog],
+      ["log", data.log],
     ];
     for (const [kind, docs] of collections) {
       for (const [key, group] of groupByKey(docs)) {
@@ -450,7 +450,7 @@ export default defineConfig({
       [string, ReadonlyArray<Localized & { slug: string }>]
     > = [
       ["work", data.work],
-      ["blog", data.blog],
+      ["log", data.log],
     ];
     for (const [kind, docs] of routed) {
       const seen = new Map<string, string>();
@@ -497,8 +497,8 @@ export default defineConfig({
         }
       }
     }
-    for (const [key, group] of groupByKey(data.blog)) {
-      const fingerprint = (doc: (typeof data.blog)[number]) =>
+    for (const [key, group] of groupByKey(data.log)) {
+      const fingerprint = (doc: (typeof data.log)[number]) =>
         JSON.stringify({
           date: doc.date,
           tags: doc.tags.map((tag) => tag.id),
@@ -512,7 +512,7 @@ export default defineConfig({
           fingerprint(doc) !== fingerprint(base)
         ) {
           problems.push(
-            `${at("blog", key, doc.locale)}: date/tags/relatedWork diverge from ${DEFAULT_LOCALE}.mdx`,
+            `${at("log", key, doc.locale)}: date/tags/relatedWork diverge from ${DEFAULT_LOCALE}.mdx`,
           );
         }
       }
@@ -520,11 +520,11 @@ export default defineConfig({
 
     // 4. `relatedWork` points at a project that exists.
     const workKeys = new Set(data.work.map((doc) => doc.translationKey));
-    for (const post of data.blog) {
+    for (const post of data.log) {
       for (const key of post.relatedWork) {
         if (!workKeys.has(key)) {
           problems.push(
-            `${at("blog", post.translationKey, post.locale)}: relatedWork '${key}' does not exist in work/`,
+            `${at("log", post.translationKey, post.locale)}: relatedWork '${key}' does not exist in work/`,
           );
         }
       }
@@ -565,7 +565,7 @@ export default defineConfig({
     // 7. Reverse index: "posts about this project". Computed, never written,
     //    and therefore never stale. It lands in the project's language; if the
     //    post does not exist in that language, the English version is used.
-    const postsByKey = groupByKey(data.blog);
+    const postsByKey = groupByKey(data.log);
     for (const item of data.work) {
       const related: RelatedPost[] = [];
       for (const [key, versions] of postsByKey) {
@@ -593,6 +593,6 @@ export default defineConfig({
     data.work.sort(
       (a, b) => a.order - b.order || a.locale.localeCompare(b.locale),
     );
-    data.blog.sort((a, b) => b.date.localeCompare(a.date));
+    data.log.sort((a, b) => b.date.localeCompare(a.date));
   },
 });

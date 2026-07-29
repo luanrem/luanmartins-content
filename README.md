@@ -32,7 +32,7 @@ down the site does not notice.
 ```
 experience/<key>/<locale>.mdx     roles — the "Where I've worked" section
 work/<key>/<locale>.mdx           projects — the "Selected work" section
-blog/<key>/<locale>.mdx           posts
+log/<key>/<locale>.mdx            notes
 site.yml                          the one loose value the site needs
 taxonomy.ts                       the closed vocabularies
 velite.config.mts                 the schema
@@ -103,9 +103,12 @@ Projects. Routed at `/<locale>/work/<slug>`.
 
 The body is the write-up, in full markdown.
 
-### `blog`
+### `log`
 
-Posts. Routed at `/<locale>/blog/<slug>`.
+Notes. Routed at `/<locale>/log/<slug>`.
+
+> The site calls this section **Log** — in the nav, in the design and in the
+> route. The collection carries the same name so there is one word for one thing.
 
 | Field         | Type    | Required | Notes                                                          |
 | ------------- | ------- | -------- | -------------------------------------------------------------- |
@@ -202,7 +205,7 @@ The CV is English-only, by choice.
 `taxonomy.ts` holds two closed vocabularies that never mix:
 
 - **`STACK`** — technologies (`nextjs`, `postgres`). Used by `work` and `experience`.
-- **`TAGS`** — subjects (`architecture`, `career`). Used by `work` and `blog`.
+- **`TAGS`** — subjects (`architecture`, `career`). Used by `work` and `log`.
 
 A value outside the list fails the build. That is what stops `nextjs`, `next-js`
 and `next.js` from becoming three names for one thing.
