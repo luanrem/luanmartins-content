@@ -1,0 +1,17 @@
+{
+  "name": "luanmartins-content",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.5.3",
+  "scripts": {
+    "dev": "velite dev",
+    "build": "velite build --strict",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5",
+    "velite": "0.4.0"
+  }
+}

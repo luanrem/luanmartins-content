@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "esnext",
+    // "bundler", e nao "nodenext", porque e o esbuild da velite que resolve os
+    // imports deste config — e ele aceita "./taxonomy" sem extensao.
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    // Neutraliza os tipos unist/mdast que a d.ts da velite importa e que nao sao
+    // dependencia direta daqui.
+    "skipLibCheck": true,
+    "isolatedModules": true
+  },
+  "include": ["*.ts", "*.mts"],
+  "exclude": ["node_modules", ".velite"]
+}
