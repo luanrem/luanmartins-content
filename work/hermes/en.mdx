@@ -14,6 +14,9 @@ stack: [kestra, nestjs, postgres, openrouter, docker]
 links:
   repo: https://github.com/luanrem/hermes
 updatedAt: 2026-07-20
+cover:
+  src: ./img/architecture.png
+  alt: Diagram of the four pipeline stages
 ---
 
 ## Why it exists
@@ -56,3 +59,5 @@ scoring history is what let me notice the problem at all.
 exactly like a quiet day on the job market. Every stage reports a count, and a
 count of zero where there is usually a number is treated as a failure, not as
 an empty result.
+
+![Pipeline architecture](./img/architecture.png)

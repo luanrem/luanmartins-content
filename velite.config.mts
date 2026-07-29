@@ -1,12 +1,12 @@
 /**
- * O schema deste repositorio. Ele roda em dois lugares, com este mesmo arquivo:
- * no CI daqui, a cada PR, so para validar; e no build da Vercel, para gerar os
- * dados que o site consome. Um schema so, num lugar so — e a razao de ele morar
- * junto do conteudo (ADR-0001).
+ * The schema for this repository. It runs in two places from this same file: in
+ * the CI here, on every PR, purely to validate; and in the Vercel build, to
+ * generate the data the site consumes. One schema, in one place — which is the
+ * reason it lives next to the content (ADR-0001).
  *
- * O `--strict` da linha de comando e obrigatorio. Sem ele a velite descarta o
- * item invalido com um aviso no log e termina verde, o que significa um texto
- * sumindo do site sem ninguem perceber.
+ * The `--strict` flag on the command line is mandatory. Without it Velite drops
+ * the invalid item with a warning in the log and exits green, which means a text
+ * vanishing from the site with nobody noticing.
  */
 import { basename } from "node:path";
 import { context, defineCollection, defineConfig, s } from "velite";
@@ -21,12 +21,12 @@ import {
 } from "./taxonomy";
 
 /* ---------------------------------------------------------------------------
-   IDENTIDADE — `<tipo>/<chave>/<locale>.mdx`
+   IDENTITY — `<type>/<key>/<locale>.mdx`
 
-   A pasta e a identidade do item e nunca aparece numa URL; o nome do arquivo e
-   o idioma; o `slug` do frontmatter e a URL publica, diferente por idioma.
-   Identidade e idioma sao derivados do caminho, e nao digitados: campo digitado
-   diverge entre dois arquivos, pasta nao tem como.
+   The folder is the item's identity and never appears in a URL; the file name is
+   the language; the `slug` in the frontmatter is the public URL, different per
+   language. Identity and language are derived from the path rather than typed: a
+   typed field can drift between two files, a folder cannot.
    --------------------------------------------------------------------------- */
 
 const KEY_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -41,37 +41,39 @@ interface Identity {
 const isLocale = (value: string): value is Locale =>
   (LOCALES as readonly string[]).includes(value);
 
-/** Devolve a identidade, ou a mensagem de erro que reprova o arquivo. */
+/** Returns the identity, or the error message that fails the file. */
 const readIdentity = (): Identity | string => {
   const { file } = context();
   const stem = file.stem;
   const dir = file.dirname;
-  if (stem == null || dir == null) return `caminho inesperado: '${file.path}'`;
+  if (stem == null || dir == null) return `unexpected path: '${file.path}'`;
   if (!isLocale(stem)) {
-    const expected = LOCALES.map((locale) => `${locale}.mdx`).join(" ou ");
-    return `'${stem}.mdx' nao e um idioma — o arquivo precisa se chamar ${expected}`;
+    const expected = LOCALES.map((locale) => `${locale}.mdx`).join(" or ");
+    return `'${stem}.mdx' is not a language — the file must be named ${expected}`;
   }
   const translationKey = basename(dir);
   if (!KEY_RE.test(translationKey)) {
-    return `a pasta '${translationKey}' nao e uma chave valida (minusculas, digitos e hifen simples)`;
+    return `the folder '${translationKey}' is not a valid key (lowercase, digits and single hyphens)`;
   }
   return { locale: stem, translationKey };
 };
 
 /* ---------------------------------------------------------------------------
-   CORPO EM BULLETS (experience)
+   BULLET BODY (experience)
 
-   A ADR diz "corpo: as conquistas em bullets". Em vez de compilar para HTML e
-   o site ter que raspar <li>, as conquistas saem como string[] — o painel
-   estiliza cada bullet, e o dado estruturado do curriculo sai de graca depois.
+   The ADR says "body: the achievements as bullets". Rather than compiling to
+   HTML and having the site scrape <li>, the achievements come out as string[] —
+   the panel styles each bullet, and structured CV data comes for free later.
 
-   O mdast esta populado mesmo sem `s.markdown()` na colecao (verificado na
-   velite 0.4.0). A tipagem local evita trazer @types/mdast so por isto.
+   The mdast is populated even without `s.markdown()` on the collection (verified
+   on Velite 0.4.0). The local typing avoids pulling in @types/mdast just for it.
    --------------------------------------------------------------------------- */
 
 interface MdNode {
   type: string;
   value?: string;
+  alt?: string | null;
+  url?: string;
   children?: MdNode[];
 }
 
@@ -80,7 +82,7 @@ const plainText = (node: MdNode): string =>
 
 interface Bullets {
   highlights: string[];
-  /** Blocos de topo que nao sao lista — texto que seria descartado calado. */
+  /** Top-level blocks that are not lists — text that would be dropped silently. */
   stray: number;
 }
 
@@ -98,37 +100,72 @@ const readBullets = (): Bullets => {
   };
 };
 
+/**
+ * Body images without alt text. Accessibility is an acceptance criterion in the
+ * site's contract, and an image without alt can only be caught here — once it
+ * becomes HTML, nobody looks again.
+ */
+const imagesWithoutAlt = (): string[] => {
+  const walk = (node: MdNode): string[] => {
+    const here =
+      node.type === "image" && (node.alt ?? "").trim().length === 0
+        ? [node.url ?? "(sem url)"]
+        : [];
+    return [...here, ...(node.children ?? []).flatMap(walk)];
+  };
+  const root = context().file.mdast as unknown as MdNode | undefined;
+  return root == null ? [] : walk(root);
+};
+
 /* ---------------------------------------------------------------------------
-   CAMPOS COMPARTILHADOS
+   SHARED FIELDS
    --------------------------------------------------------------------------- */
 
 /**
- * O slug nao usa `s.slug()`. A unicidade dela e global por escopo, e `en.mdx` e
- * `pt.mdx` do mesmo item podem legitimamente ter o mesmo slug — nome proprio
- * nao traduz. A unicidade que se quer e por idioma, e o grupo do `s.slug()` e
- * fixado quando o schema e construido, sem acesso ao arquivo. Formato aqui,
- * unicidade no `prepare`, que ve todos os documentos com o locale ja derivado.
+ * The item's cover. `s.image()` copies the file to the output and returns
+ * dimensions plus the blur placeholder; `alt` is a separate, required field
+ * because `s.image()` has nowhere to store alt text, and an image without alt
+ * does not meet the site's accessibility criterion.
+ *
+ * The path is relative to the file itself — the image lives in the item's
+ * `img/` folder.
+ */
+const coverField = () =>
+  s
+    .object({
+      src: s.image(),
+      alt: s.string().min(3).max(160),
+    })
+    .optional();
+
+/**
+ * The slug does not use `s.slug()`. Its uniqueness is global per scope, and the
+ * `en.mdx` and `pt.mdx` of one item may legitimately share a slug — a proper
+ * noun does not translate. The uniqueness we want is per language, and the group
+ * of `s.slug()` is fixed when the schema is built, with no access to the file.
+ * Format here, uniqueness in `prepare`, which sees every document with its
+ * locale already derived.
  */
 const slugField = () =>
   s
     .string()
     .min(3)
     .max(80)
-    .regex(SLUG_RE, "o slug e minusculo, com palavras separadas por um hifen");
+    .regex(SLUG_RE, "a slug is lowercase, with words separated by a single hyphen");
 
 const stackField = () =>
   s
     .array(s.enum(STACK))
     .min(1)
-    .refine((ids) => new Set(ids).size === ids.length, "stack com item repetido")
+    .refine((ids) => new Set(ids).size === ids.length, "duplicate item in stack")
     .transform((ids) => ids.map((id) => ({ id, label: STACK_LABELS[id] })));
 
-/** O rotulo sai no idioma do arquivo — assunto traduz, tecnologia nao. */
+/** The label comes out in the file's language — subjects translate, technologies do not. */
 const tagsField = () =>
   s
     .array(s.enum(TAGS))
     .min(1)
-    .refine((ids) => new Set(ids).size === ids.length, "tag repetida")
+    .refine((ids) => new Set(ids).size === ids.length, "duplicate tag")
     .transform((ids, ctx) => {
       const identity = readIdentity();
       if (typeof identity === "string") {
@@ -139,10 +176,10 @@ const tagsField = () =>
     });
 
 /* ---------------------------------------------------------------------------
-   COLECOES
+   COLLECTIONS
    --------------------------------------------------------------------------- */
 
-/** Um post que cita este projeto. Calculado no `prepare`, nunca escrito. */
+/** A post that cites this project. Computed in `prepare`, never written. */
 interface RelatedPost {
   translationKey: string;
   locale: Locale;
@@ -153,19 +190,19 @@ interface RelatedPost {
 
 const experience = defineCollection({
   name: "Experience",
-  // O padrao e largo de proposito: `es.mdx` deve REPROVAR com mensagem, e nao
-  // sumir em silencio por nao casar com o glob.
+  // The pattern is deliberately wide: `es.mdx` must FAIL with a message rather
+  // than vanish silently by not matching the glob.
   pattern: "experience/*/*.mdx",
   schema: s
     .object({
       company: s.string().min(2).max(60),
       role: s.string().min(2).max(80),
-      /** "Remote", "Curitiba, Brazil". O "· remote" do painel e moldura. */
+      /** "Remote", "Curitiba, Brazil". The panel's "· remote" is UI chrome. */
       location: s.string().min(2).max(60),
-      /** Uma linha sobre o trabalho. Sem a localizacao, que ja e campo. */
+      /** One line about the work. Leave the location out — it is already a field. */
       note: s.string().min(10).max(120),
       startDate: s.string().regex(MONTH_RE, "use YYYY-MM"),
-      /** Ausente = cargo atual. Nao existe campo `current` no frontmatter. */
+      /** Absent means current role. There is no `current` field in the frontmatter. */
       endDate: s.string().regex(MONTH_RE, "use YYYY-MM").optional(),
       stack: stackField(),
     })
@@ -179,7 +216,7 @@ const experience = defineCollection({
         ctx.addIssue({
           code: "custom",
           fatal: true,
-          message: `endDate '${data.endDate}' vem antes de startDate '${data.startDate}'`,
+          message: `endDate '${data.endDate}' comes before startDate '${data.startDate}'`,
         });
         return s.NEVER;
       }
@@ -188,7 +225,7 @@ const experience = defineCollection({
         ctx.addIssue({
           code: "custom",
           fatal: true,
-          message: `o corpo precisa de ao menos 3 bullets, tem ${highlights.length}`,
+          message: `the body needs at least 3 bullets, it has ${highlights.length}`,
         });
         return s.NEVER;
       }
@@ -196,7 +233,7 @@ const experience = defineCollection({
         ctx.addIssue({
           code: "custom",
           fatal: true,
-          message: `o corpo so aceita bullets — ${stray} bloco(s) fora de lista seriam descartados`,
+          message: `the body only accepts bullets — ${stray} block(s) outside a list would be dropped`,
         });
         return s.NEVER;
       }
@@ -216,23 +253,23 @@ const work = defineCollection({
   schema: s
     .object({
       title: s.string().min(2).max(60),
-      /** Curto, embaixo do H1 da pagina do case study. */
+      /** Short, under the H1 of the case-study page. */
       subtitle: s.string().min(4).max(60),
-      /** A frase do cartao da home. */
+      /** The sentence on the home card. */
       headline: s.string().min(20).max(220),
       slug: slugField(),
       /**
-       * Decide o rotulo do rodape do cartao. Guarda o ESTADO, nao a palavra:
-       * "case study" e moldura de UI, traduzida, e mora no site.
+       * Decides the card's footer label. It stores the STATE, not the word:
+       * "case study" is UI chrome, translated, and lives in the site.
        */
       kind: s.enum(["case-study", "overview"]),
-      /** O status do cartao. O texto traduz; o tom nao. */
+      /** The card's status. The text translates; the tone does not. */
       status: s.object({
         text: s.string().min(3).max(40),
         tone: s.enum(["live", "idle"]),
       }),
       order: s.number().int().min(1),
-      /** Controla aparecer na home. `false` continua tendo pagina e URL. */
+      /** Controls appearing on the home page. `false` still has a page and a URL. */
       featured: s.boolean(),
       tags: tagsField(),
       stack: stackField(),
@@ -242,8 +279,9 @@ const work = defineCollection({
           live: s.string().url().optional(),
         })
         .default({}),
-      /** Guardado e nunca exibido: alimenta o `lastmod` do sitemap. */
+      /** Stored and never displayed: feeds the sitemap's `lastmod`. */
       updatedAt: s.isodate(),
+      cover: coverField(),
       content: s.markdown(),
     })
     .transform((data, ctx) => {
@@ -252,11 +290,20 @@ const work = defineCollection({
         ctx.addIssue({ code: "custom", message: identity, fatal: true });
         return s.NEVER;
       }
+      const noAlt = imagesWithoutAlt();
+      if (noAlt.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          fatal: true,
+          message: `image without alt text in the body: ${noAlt.join(", ")}`,
+        });
+        return s.NEVER;
+      }
       return {
         ...data,
         locale: identity.locale,
         translationKey: identity.translationKey,
-        // Preenchido no `prepare`. Declarado aqui para o tipo gerado ter o campo.
+        // Filled in `prepare`. Declared here so the generated type has the field.
         relatedPosts: [] as RelatedPost[],
       };
     }),
@@ -272,8 +319,9 @@ const blog = defineCollection({
       slug: slugField(),
       date: s.isodate(),
       tags: tagsField(),
-      /** Chaves de pasta de `work/`. A existencia e checada no `prepare`. */
+      /** Folder keys from `work/`. Existence is checked in `prepare`. */
       relatedWork: s.array(s.string().regex(KEY_RE)).default([]),
+      cover: coverField(),
       content: s.markdown(),
       metadata: s.metadata(),
     })
@@ -281,6 +329,15 @@ const blog = defineCollection({
       const identity = readIdentity();
       if (typeof identity === "string") {
         ctx.addIssue({ code: "custom", message: identity, fatal: true });
+        return s.NEVER;
+      }
+      const noAlt = imagesWithoutAlt();
+      if (noAlt.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          fatal: true,
+          message: `image without alt text in the body: ${noAlt.join(", ")}`,
+        });
         return s.NEVER;
       }
       return {
@@ -297,25 +354,25 @@ const site = defineCollection({
   single: true,
   schema: s.object({
     /**
-     * O PDF e hospedado FORA deste repositorio: aqui e publico e o historico do
-     * Git e permanente, entao qualquer versao antiga do curriculo — com os
-     * dados pessoais que ela tiver — ficaria rastreavel para sempre. Aqui mora
-     * so o link.
+     * The PDF is hosted OUTSIDE this repository: here is public and Git history
+     * is permanent, so any older version of the CV — with whatever personal data
+     * it carries — would stay traceable forever. Only the link lives here.
      */
     resumeUrl: s.string().url().startsWith("https://"),
   }),
 });
 
 /* ---------------------------------------------------------------------------
-   INVARIANTES QUE ATRAVESSAM ARQUIVOS
+   INVARIANTS THAT CROSS FILES
 
-   Ficam todos no `prepare`, e nao espalhados em `superRefine`, por tres razoes:
-   ele e o unico lugar que ve todas as colecoes de uma vez; reporta TODAS as
-   violacoes num relatorio so, em vez de morrer na primeira; e nao depende do
-   `config.cache`, que a propria velite marca como deprecado para a 1.0.
+   They all live in `prepare` rather than being scattered across `superRefine`,
+   for three reasons: it is the only place that sees every collection at once; it
+   reports ALL violations in a single report instead of dying on the first; and
+   it does not depend on `config.cache`, which Velite itself marks as deprecated
+   for 1.0.
 
-   O CLI imprime apenas `err.message` quando isto lanca — por isso a mensagem
-   carrega o caminho de cada arquivo.
+   The CLI prints only `err.message` when this throws — which is why the message
+   carries the path of every offending file.
    --------------------------------------------------------------------------- */
 
 interface Localized {
@@ -336,25 +393,31 @@ const groupByKey = <T extends Localized>(
 };
 
 export default defineConfig({
-  // O conteudo e a raiz. O default da velite ('content') e relativo a ESTE
-  // arquivo e apontaria para uma pasta que nao existe.
+  // The content is the root. Velite's default ('content') is relative to THIS
+  // file and would point at a folder that does not exist.
   root: ".",
 
-  // Inerte na pratica: o CLI define `strict` com default `false`, e o resolver
-  // faz `options.strict ?? loadedConfig.strict`, entao a linha de comando sempre
-  // ganha. Fica escrito porque e a intencao, e porque protege `build()` chamado
-  // por API. Quem garante de verdade e o `--strict` do script.
+  // Inert in practice: the CLI defines `strict` with a `false` default, and the
+  // resolver does `options.strict ?? loadedConfig.strict`, so the command line
+  // always wins. It stays written because it is the intent, and because it
+  // protects `build()` called through the API. What actually enforces it is the
+  // `--strict` in the script.
   strict: true,
 
   output: {
-    // Relativos a ESTE arquivo. O repositorio e baixado para `<site>/content/`,
-    // entao os dados caem em `<site>/content/.velite` e o asset no `public/` do
-    // site, um nivel acima.
+    // Everything stays INSIDE the checkout, relative to this file. The obvious
+    // alternative — pointing `assets` at the site's `public/`, one level up —
+    // creates and writes to a folder outside the repository: in the CI here that
+    // leaks into the runner's parent directory, and locally it litters the
+    // folder containing the clone.
+    //
+    // The content repository produces a self-contained bundle; who decides where
+    // the files live is the site, which copies `.velite/static` into its own
+    // `public/` before `next build`.
     data: ".velite",
-    assets: "../public/static",
+    assets: ".velite/static",
     base: "/static/",
-    // NUNCA ligar: `clean` faz rm -rf em `output.assets`, que aponta para o
-    // `public/` do repositorio do site.
+    // NEVER turn on: `clean` does rm -rf on `output.assets`.
     clean: false,
   },
 
@@ -365,7 +428,7 @@ export default defineConfig({
     const at = (kind: string, key: string, locale?: string) =>
       `${kind}/${key}${locale == null ? "" : `/${locale}.mdx`}`;
 
-    // 1. Ingles obrigatorio, portugues opcional (ADR-0002).
+    // 1. English required, Portuguese optional (ADR-0002).
     const collections: ReadonlyArray<[string, readonly Localized[]]> = [
       ["experience", data.experience],
       ["work", data.work],
@@ -375,14 +438,14 @@ export default defineConfig({
       for (const [key, group] of groupByKey(docs)) {
         if (!group.some((doc) => doc.locale === DEFAULT_LOCALE)) {
           problems.push(
-            `${at(kind, key)}: falta ${DEFAULT_LOCALE}.mdx — o ingles e obrigatorio`,
+            `${at(kind, key)}: missing ${DEFAULT_LOCALE}.mdx — English is required`,
           );
         }
       }
     }
 
-    // 2. Slug unico POR IDIOMA. Global reprovaria `en` e `pt` compartilhando o
-    //    slug de um nome proprio, que e legitimo.
+    // 2. Slug unique PER LANGUAGE. A global check would reject `en` and `pt`
+    //    sharing the slug of a proper noun, which is legitimate.
     const routed: ReadonlyArray<
       [string, ReadonlyArray<Localized & { slug: string }>]
     > = [
@@ -396,7 +459,7 @@ export default defineConfig({
         const first = seen.get(scope);
         if (first != null) {
           problems.push(
-            `${at(kind, doc.translationKey, doc.locale)}: slug '${doc.slug}' ja usado por ${first} no mesmo idioma`,
+            `${at(kind, doc.translationKey, doc.locale)}: slug '${doc.slug}' already used by ${first} in the same language`,
           );
           continue;
         }
@@ -404,8 +467,8 @@ export default defineConfig({
       }
     }
 
-    // 3. O que nao e texto nao pode divergir entre os idiomas do mesmo item —
-    //    senao a home mostraria cartoes diferentes em cada idioma.
+    // 3. What is not text must not diverge between the languages of one item —
+    //    otherwise the home page would show different cards per language.
     for (const [key, group] of groupByKey(data.work)) {
       const fingerprint = (doc: (typeof data.work)[number]) =>
         JSON.stringify({
@@ -417,6 +480,9 @@ export default defineConfig({
           tags: doc.tags.map((tag) => tag.id),
           stack: doc.stack.map((item) => item.id),
           links: doc.links,
+          // The PRESENCE of the cover, not the file: `alt` translates, but one
+          // language with a cover and the other without renders different cards.
+          hasCover: doc.cover != null,
         });
       const base = group.find((doc) => doc.locale === DEFAULT_LOCALE);
       if (base == null) continue;
@@ -426,7 +492,7 @@ export default defineConfig({
           fingerprint(doc) !== fingerprint(base)
         ) {
           problems.push(
-            `${at("work", key, doc.locale)}: kind/order/featured/updatedAt/status.tone/tags/stack/links divergem de ${DEFAULT_LOCALE}.mdx`,
+            `${at("work", key, doc.locale)}: diverges from ${DEFAULT_LOCALE}.mdx in kind/order/featured/updatedAt/status.tone/tags/stack/links or in whether a cover is present`,
           );
         }
       }
@@ -446,44 +512,44 @@ export default defineConfig({
           fingerprint(doc) !== fingerprint(base)
         ) {
           problems.push(
-            `${at("blog", key, doc.locale)}: date/tags/relatedWork divergem de ${DEFAULT_LOCALE}.mdx`,
+            `${at("blog", key, doc.locale)}: date/tags/relatedWork diverge from ${DEFAULT_LOCALE}.mdx`,
           );
         }
       }
     }
 
-    // 4. `relatedWork` aponta para projeto que existe.
+    // 4. `relatedWork` points at a project that exists.
     const workKeys = new Set(data.work.map((doc) => doc.translationKey));
     for (const post of data.blog) {
       for (const key of post.relatedWork) {
         if (!workKeys.has(key)) {
           problems.push(
-            `${at("blog", post.translationKey, post.locale)}: relatedWork '${key}' nao existe em work/`,
+            `${at("blog", post.translationKey, post.locale)}: relatedWork '${key}' does not exist in work/`,
           );
         }
       }
     }
 
-    // 5. Um cargo atual, no maximo.
+    // 5. At most one current role.
     const current = data.experience.filter(
       (doc) => doc.current && doc.locale === DEFAULT_LOCALE,
     );
     if (current.length > 1) {
       problems.push(
-        `experience: ${current.length} cargos sem endDate (${current
+        `experience: ${current.length} roles without endDate (${current
           .map((doc) => doc.translationKey)
-          .join(", ")}) — so um pode ser o atual`,
+          .join(", ")}) — only one can be current`,
       );
     }
 
-    // 6. `order` decide a vitrine da home; empate seria ordem aleatoria.
+    // 6. `order` decides the home showcase; a tie would mean arbitrary order.
     const orders = new Map<number, string>();
     for (const doc of data.work) {
       if (doc.locale !== DEFAULT_LOCALE) continue;
       const first = orders.get(doc.order);
       if (first != null) {
         problems.push(
-          `work: order ${doc.order} repetido em ${first} e ${doc.translationKey}`,
+          `work: order ${doc.order} repeated in ${first} and ${doc.translationKey}`,
         );
         continue;
       }
@@ -492,13 +558,13 @@ export default defineConfig({
 
     if (problems.length > 0) {
       throw new Error(
-        `\n${problems.length} problema(s) de conteudo:\n\n  ${problems.join("\n  ")}\n`,
+        `\n${problems.length} content problem(s):\n\n  ${problems.join("\n  ")}\n`,
       );
     }
 
-    // 7. Indice inverso: "posts que falam deste projeto". Calculado, nunca
-    //    escrito, e por isso nunca desatualiza. Cai no idioma do projeto; se o
-    //    post nao existir naquele idioma, entra a versao em ingles.
+    // 7. Reverse index: "posts about this project". Computed, never written,
+    //    and therefore never stale. It lands in the project's language; if the
+    //    post does not exist in that language, the English version is used.
     const postsByKey = groupByKey(data.blog);
     for (const item of data.work) {
       const related: RelatedPost[] = [];
@@ -522,7 +588,7 @@ export default defineConfig({
       item.relatedPosts = related.sort((a, b) => b.date.localeCompare(a.date));
     }
 
-    // 8. Ordem deterministica na saida, para o site nao reordenar em runtime.
+    // 8. Deterministic output order, so the site does not reorder at runtime.
     data.experience.sort((a, b) => b.startDate.localeCompare(a.startDate));
     data.work.sort(
       (a, b) => a.order - b.order || a.locale.localeCompare(b.locale),

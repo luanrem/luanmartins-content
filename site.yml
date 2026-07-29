@@ -1,8 +1,8 @@
-# O unico dado solto do site que nao e texto longo e nao pode ficar hardcoded
-# num componente.
+# The one loose value the site needs that is not long-form text and cannot be
+# hardcoded into a component.
 #
-# O PDF do curriculo e hospedado FORA deste repositorio de proposito: aqui e
-# publico e o historico do Git e permanente, entao qualquer versao antiga do
-# arquivo — com os dados pessoais que ela carregasse — ficaria rastreavel para
-# sempre, mesmo depois de substituida. Aqui mora so o link.
+# The CV PDF is hosted OUTSIDE this repository on purpose: here is public and Git
+# history is permanent, so any older version of the file — with whatever personal
+# data it carried — would stay traceable forever, even after being replaced. Only
+# the link lives here.
 resumeUrl: "https://luanmartins.com/cv/luan-martins-resume.pdf"
