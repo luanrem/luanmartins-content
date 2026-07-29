@@ -8,8 +8,17 @@
  * the invalid item with a warning in the log and exits green, which means a text
  * vanishing from the site with nobody noticing.
  */
-import { basename } from "node:path";
-import { context, defineCollection, defineConfig, s } from "velite";
+import { readFile } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
+import {
+  context,
+  defineCollection,
+  defineConfig,
+  getImageMetadata,
+  isRelativePath,
+  s,
+  type MarkdownOptions,
+} from "velite";
 import {
   DEFAULT_LOCALE,
   LOCALES,
@@ -75,6 +84,8 @@ interface MdNode {
   alt?: string | null;
   url?: string;
   children?: MdNode[];
+  /** `hProperties` is how mdast hands attributes to the HTML it becomes. */
+  data?: { hProperties?: Record<string, unknown> };
 }
 
 const plainText = (node: MdNode): string =>
@@ -116,6 +127,65 @@ const imagesWithoutAlt = (): string[] => {
   const root = context().file.mdast as unknown as MdNode | undefined;
   return root == null ? [] : walk(root);
 };
+
+/* ---------------------------------------------------------------------------
+   THE BODY PIPELINE
+
+   What the body needs that Velite does not do on its own, handed to every
+   `s.markdown()` through `markdownOptions`. None of it decides how anything
+   looks — the site owns the appearance (ADR-0001).
+   --------------------------------------------------------------------------- */
+
+/**
+ * Writes `width` and `height` on every body image — the same measurement
+ * `s.image()` already does for the cover, applied to the body, so the text does
+ * not jump when the image finishes loading.
+ *
+ * It is a REMARK plugin on purpose. Velite pushes its `rehypeCopyLinkedFiles`
+ * ahead of any rehype plugin we pass (verified in the 0.4.0 dist), so by the
+ * time rehype runs the URL is already the hashed `/static/...` one and the file
+ * on disk would have to be found again. Here the URL is still `./img/foo.png`,
+ * relative to the `.mdx` being read. `rehypeCopyLinkedFiles` only rewrites
+ * `src`, so the dimensions survive it untouched.
+ */
+const remarkImageSize =
+  () =>
+  async (tree: MdNode, file: { path?: string }): Promise<void> => {
+    const images: MdNode[] = [];
+    const walk = (node: MdNode): void => {
+      if (node.type === "image") images.push(node);
+      for (const child of node.children ?? []) walk(child);
+    };
+    walk(tree);
+
+    const from = dirname(file.path ?? ".");
+    await Promise.all(
+      images.map(async (node) => {
+        const url = node.url ?? "";
+        // Same predicate `rehypeCopyLinkedFiles` uses to decide what it owns:
+        // an external URL is not ours to measure, and the schema forbids one.
+        if (!isRelativePath(url)) return;
+        // `./img/foo.png?v=2` and `#anchor` are the path plus noise.
+        const path = resolve(from, url.split(/[?#]/)[0]);
+        let width: number;
+        let height: number;
+        try {
+          const metadata = await getImageMetadata(await readFile(path));
+          if (metadata == null) throw new Error("no dimensions in the file");
+          ({ width, height } = metadata);
+        } catch (err) {
+          // Loud rather than silent: an unmeasurable image is a body that jumps
+          // on load, and nobody looks at it again once it is HTML.
+          throw new Error(`could not measure '${url}': ${(err as Error).message}`);
+        }
+        node.data = { ...node.data, hProperties: { ...node.data?.hProperties, width, height } };
+      }),
+    );
+  };
+
+const markdownOptions = {
+  remarkPlugins: [remarkImageSize],
+} satisfies MarkdownOptions;
 
 /* ---------------------------------------------------------------------------
    SHARED FIELDS
@@ -282,7 +352,7 @@ const work = defineCollection({
       /** Stored and never displayed: feeds the sitemap's `lastmod`. */
       updatedAt: s.isodate(),
       cover: coverField(),
-      content: s.markdown(),
+      content: s.markdown(markdownOptions),
       /**
        * Derived, nobody fills it in. The case-study page shows reading time in
        * the meta line — it is the only cost signal there, because `updatedAt`
@@ -328,7 +398,7 @@ const log = defineCollection({
       /** Folder keys from `work/`. Existence is checked in `prepare`. */
       relatedWork: s.array(s.string().regex(KEY_RE)).default([]),
       cover: coverField(),
-      content: s.markdown(),
+      content: s.markdown(markdownOptions),
       metadata: s.metadata(),
     })
     .transform((data, ctx) => {

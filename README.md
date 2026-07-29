@@ -144,8 +144,10 @@ work/hermes/
 
 Two ways to use one, and both take a **relative path**:
 
-**In the body**, as ordinary markdown. The file is copied to the output and the
-URL is rewritten to a content-hashed public path:
+**In the body**, as ordinary markdown. The file is copied to the output, the URL
+is rewritten to a content-hashed public path, and the build measures the file and
+writes `width` and `height` onto the `<img>` — so the text around it does not
+jump when the image finishes loading:
 
 ```markdown
 ![Diagram of the four pipeline stages](./img/architecture.png)
@@ -160,7 +162,9 @@ cover:
 ```
 
 A cover produces width, height and a `blurDataURL` placeholder alongside the
-path, so the site can render it without layout shift.
+path, so the site can render it without layout shift. The same measurement runs
+on body images; only the cover gets the blur, because a body image has nowhere to
+carry it.
 
 Rules the build enforces:
 
@@ -244,6 +248,8 @@ pnpm build    # the same gate CI runs
 - An `experience` body containing anything other than bullets
 - An image without alt text, in the body or as a cover
 - A cover present in one language of an item and missing in the other
+- A body image the build cannot measure — a missing file, or one that is not an
+  image
 
 Failures are reported all at once, with the path of each offending file.
 
