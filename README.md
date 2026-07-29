@@ -124,6 +124,55 @@ Posts. Routed at `/<locale>/blog/<slug>`.
 `resumeUrl` — a link to the CV. The PDF is hosted **outside** this repository;
 see the ground rules below.
 
+## Images
+
+**Images live in the item's folder, next to the text that uses them.** They are
+committed here like any other content — the repository stays self-contained, so
+a checkout is everything needed to rebuild the site.
+
+```
+work/hermes/
+  en.mdx
+  pt.mdx
+  architecture.png     ← referenced by both
+```
+
+Two ways to use one, and both take a **relative path**:
+
+**In the body**, as ordinary markdown. The file is copied to the output and the
+URL is rewritten to a content-hashed public path:
+
+```markdown
+![Diagram of the four pipeline stages](./architecture.png)
+```
+
+**As a cover**, in the frontmatter — for the card and for social previews:
+
+```yaml
+cover:
+  src: ./architecture.png
+  alt: Diagram of the four pipeline stages
+```
+
+A cover produces width, height and a `blurDataURL` placeholder alongside the
+path, so the site can render it without layout shift.
+
+Rules the build enforces:
+
+- **Alt text is required, everywhere.** An image in the body without alt text
+  fails the build, and `cover.alt` is a required field. Accessibility is an
+  acceptance criterion on the site, and a missing alt is only catchable here.
+- **`alt` is translated; the file is not.** Both languages point at the same
+  image and describe it in their own words.
+- **Either both languages have a cover or neither does.** One card with an
+  image and one without is a difference visitors would see.
+
+The same image referenced from several files is stored once — the output name
+is a hash of the contents.
+
+Everything generated lands in `.velite/`, which is git-ignored. Nothing is
+written outside this repository.
+
 ## Languages
 
 **`en` is required. `pt` is optional.** An item missing `en.mdx` fails the build;
@@ -184,6 +233,8 @@ pnpm build    # the same gate CI runs
 - Two `work` items sharing the same `order`
 - Non-text fields that disagree between the languages of one item
 - An `experience` body containing anything other than bullets
+- An image without alt text, in the body or as a cover
+- A cover present in one language of an item and missing in the other
 
 Failures are reported all at once, with the path of each offending file.
 
