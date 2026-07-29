@@ -1,88 +1,94 @@
 # AGENTS.md
 
-Contrato de trabalho deste repositório. Vale para qualquer agente de IA e para
-mim. Descreve **restrições**; o [`README.md`](README.md) descreve o sistema, e
-não se repete aqui.
+Working contract for this repository. It applies to any AI agent and to me. It
+describes **constraints**; the [`README.md`](README.md) describes the system, and
+is not repeated here.
 
-> Este repositório é **conteúdo**, não código. O site que o consome mora em
-> outro repositório, e as decisões de arquitetura (ADR-0001 e ADR-0002) moram
-> lá — elas são a fonte de verdade.
+> This repository is **content**, not code. The site that consumes it lives in
+> another repository, and the architecture decisions (ADR-0001 and ADR-0002)
+> live there — they are the source of truth.
 
-## Idioma
+## Language
 
-| O quê | Idioma |
-| --- | --- |
-| Conteúdo (`.mdx`) | inglês obrigatório, português opcional |
-| `README.md` | inglês — quem cai nele vem do perfil do GitHub |
-| Este arquivo, comentários de código, mensagens de commit | PT-BR |
-| Identificadores, chaves de pasta, slugs, termos de taxonomia | inglês |
+Everything written here is in **English**: this file, code comments, commit
+messages, PR titles and bodies. Content itself is **English required,
+Portuguese optional** — see the README.
 
-Mensagens de commit em PT-BR **sem acentos**, imperativo, prefixo convencional
-(`feat:`, `fix:`, `chore:`, `docs:`, `ci:`), um propósito por commit. **Sem
-`Co-Authored-By` e sem qualquer menção a IA** — mesma regra do repositório do
-site.
+> The site repository still writes documentation, comments and commits in
+> PT-BR. That divergence is deliberate and scoped: this repository is public,
+> its README already targets whoever arrives from the GitHub profile, and its
+> content is mostly English. Do not "fix" one to match the other.
 
-## Regras invioláveis
+Commit messages: conventional prefix (`feat:`, `fix:`, `chore:`, `docs:`,
+`ci:`), imperative, one purpose per commit. **No `Co-Authored-By` and no mention
+of AI whatsoever** — same rule the site repository keeps, and it overrides the
+tool's default.
 
-Se uma delas atrapalhar, **pare e pergunte** — não contorne.
+Commits written before this rule stay in Portuguese. Rewriting history to
+satisfy a new convention would destroy the only memory we have of it.
 
-1. **Nada de dado pessoal.** O repositório é público e o histórico do Git é
-   permanente: telefone, endereço, documento ou qualquer coisa que você não
-   queira rastreável para sempre **não entra**, nem num commit que será
-   revertido depois. Apagar o arquivo não remove dos commits antigos. Cidade e
-   estado são aceitos; já são públicos no site. O PDF do currículo é hospedado
-   fora daqui exatamente por isso.
+## Non-negotiable rules
 
-2. **Não inventar termo de taxonomia.** `stack` e `tags` só aceitam o que está
-   em [`taxonomy.ts`](taxonomy.ts). Precisou de um termo novo? Adicione o id
-   **e** o rótulo no mesmo arquivo — os tipos não compilam com um sem o outro.
-   Nunca criar variante de grafia, plural ou idioma de um termo existente.
+If one of them gets in the way, **stop and ask** — do not work around it.
 
-3. **A estrutura é uma regra só:** `<tipo>/<chave>/<locale>.mdx`. A pasta é a
-   identidade do item e nunca vira URL; o nome do arquivo é o idioma; o `slug`
-   do frontmatter é a URL. Nenhum dos dois primeiros é digitado no frontmatter.
+1. **No personal data.** This repository is public and Git history is permanent:
+   a phone number, an address, a document number, or anything you would not want
+   traceable forever **does not go in** — not even in a commit you plan to revert
+   later. Deleting the file does not remove it from old commits. City and state
+   are fine; they are already public on the site. The CV PDF is hosted outside
+   this repository for exactly this reason.
 
-4. **Toda imagem tem texto alternativo.** No corpo e na capa. É critério de
-   aceite de acessibilidade no site, e depois de virar HTML ninguém mais pega.
-   Imagem mora em `<tipo>/<chave>/img/`, referenciada por caminho relativo
-   (`./img/arquivo.png`) — nunca URL externa, senão o repositório deixa de
-   reconstruir o site sozinho.
+2. **Never invent a taxonomy term.** `stack` and `tags` only accept what is in
+   [`taxonomy.ts`](taxonomy.ts). Need a new one? Add the id **and** its label in
+   the same file — the types will not compile with one and not the other. Never
+   create a spelling, plural or language variant of a term that already exists.
 
-5. **Não mergear.** Merge na `main` dispara um deploy do site — é passo humano.
-   Agente abre PR e para aí.
+3. **The structure is one rule:** `<type>/<key>/<locale>.mdx`. The folder is the
+   item's identity and never becomes a URL; the file name is the language; the
+   `slug` in the frontmatter is the URL. Neither of the first two is typed into
+   the frontmatter.
 
-## Escrita
+4. **Every image has alt text.** In the body and on the cover. It is an
+   accessibility acceptance criterion on the site, and once it becomes HTML
+   nobody catches it any more. Images live in `<type>/<key>/img/`, referenced by
+   a relative path (`./img/file.png`) — never an external URL, or the repository
+   stops being able to rebuild the site on its own.
 
-- **Branch é rascunho.** Não existe campo `draft`: se não está pronto, não está
-  na `main`. Arquivo com nome `_algo.mdx` é ignorado pelo build, para o caso de
-  querer commitar sem publicar.
-- **`featured: false` não é "não publicado".** O item continua com página e URL;
-  só sai da vitrine da home.
-- **Traduzir nunca bloqueia publicar.** Escreve em inglês, mergeia, está no ar.
-  A tradução entra depois, em PR própria.
-- Ao traduzir, **repita os campos que não são texto** (`order`, `featured`,
+5. **Never merge.** A merge into `main` triggers a deploy of the site — that is a
+   human step. An agent opens a PR and stops there.
+
+## Writing
+
+- **A branch is a draft.** There is no `draft` field: if it is not ready, it is
+  not on `main`. A file named `_something.mdx` is skipped by the build, for when
+  you want to commit without publishing.
+- **`featured: false` is not "unpublished".** The item keeps its page and its
+  URL; it only leaves the home page showcase.
+- **Translating never blocks publishing.** Write in English, merge, it is live.
+  The translation lands later, in its own PR.
+- When translating, **repeat the fields that are not text** (`order`, `featured`,
   `updatedAt`, `status.tone`, `tags`, `stack`, `links`, `date`, `relatedWork`,
-  presença de `cover`). O build reprova se divergirem.
-- `relatedWork` é declarado **só no post**. A lista inversa é calculada — nunca
-  escreva "posts sobre este projeto" à mão.
+  presence of `cover`). The build fails if they disagree.
+- `relatedWork` is declared **only on the post**. The reverse list is computed —
+  never write "posts about this project" by hand.
 
-## Antes de abrir PR
+## Before opening a PR
 
 ```bash
 pnpm typecheck && pnpm build
 ```
 
-São os mesmos dois que o CI roda, nessa ordem. Rodar local é só antecipar o
-resultado.
+Those are the same two the CI runs, in that order. Running them locally only
+brings the result forward.
 
-O `--strict` vive dentro do `pnpm build` e **não é opcional**: sem ele a Velite
-descarta o item inválido com um aviso e termina verde — um texto sumindo do site
-sem ninguém perceber.
+`--strict` lives inside `pnpm build` and **is not optional**: without it Velite
+drops the invalid item with a warning and exits green — a text vanishing from the
+site with nobody noticing.
 
-## O que este repositório não faz
+## What this repository does not do
 
-- Não tem estilo, componente, layout ou runtime. É markdown com schema.
-- Não decide como o conteúdo é exibido. Título de seção, rótulo de botão,
-  numeral de faixa e texto de interface são **moldura**, e moram no repositório
-  do site.
-- A faixa "Stack" da home não sai daqui.
+- No styles, no components, no layout, no runtime. It is markdown with a schema.
+- It does not decide how content is displayed. Section titles, button labels,
+  band numerals and interface copy are **chrome**, and live in the site
+  repository.
+- The home page's "Stack" band does not come from here.

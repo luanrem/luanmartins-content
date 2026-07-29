@@ -1,24 +1,24 @@
 /**
- * Os vocabularios fechados do conteudo. Valor fora daqui reprova o PR — e o que
- * impede `nextjs`, `next-js` e `next.js` virarem tres nomes para a mesma coisa
- * sem depender da disciplina de quem escreve.
+ * The closed vocabularies of the content. A value outside them fails the PR —
+ * that is what stops `nextjs`, `next-js` and `next.js` from becoming three names
+ * for one thing without relying on the discipline of whoever is writing.
  *
- * STACK e TAGS sao listas diferentes e nao se misturam: STACK e tecnologia,
- * TAGS e assunto. A faixa "Stack" da home NAO sai daqui — ela e moldura de UI e
- * mora no repositorio do site.
+ * STACK and TAGS are different lists and never mix: STACK is technology, TAGS is
+ * subject. The home page's "Stack" band does NOT come from here — it is UI
+ * chrome and lives in the site repository.
  *
- * Os rotulos viajam junto do dado porque o chip mostra `Next.js`, e nao
- * `nextjs`. Manter esse mapa no site criaria duas listas para sincronizar, que
- * e exatamente o problema que a taxonomia validada existe para matar.
+ * The labels travel with the data because the chip shows `Next.js`, not
+ * `nextjs`. Keeping that map in the site would create two lists to keep in sync,
+ * which is exactly the problem a validated taxonomy exists to kill.
  */
 
 export const LOCALES = ["en", "pt"] as const;
 export type Locale = (typeof LOCALES)[number];
 
-/** O idioma obrigatorio. Todo item precisa existir nele (ADR-0002). */
+/** The required language. Every item must exist in it (ADR-0002). */
 export const DEFAULT_LOCALE: Locale = "en";
 
-/** Tecnologias. Vale para `work` e `experience`. */
+/** Technologies. Used by `work` and `experience`. */
 export const STACK = [
   // frontend
   "react",
@@ -47,7 +47,7 @@ export const STACK = [
   "kestra",
   "openrouter",
   "websockets",
-  // infraestrutura
+  // infrastructure
   "docker",
   "kubernetes",
   "terraform",
@@ -58,15 +58,16 @@ export const STACK = [
   "proxmox",
   "traefik",
   "tailscale",
-  // outros
+  // other
   "chrome-extension",
 ] as const;
 
 export type StackId = (typeof STACK)[number];
 
 /**
- * O rotulo que o chip mostra. Nome de tecnologia nao traduz, entao e um so.
- * O `Record` obriga: id novo sem rotulo nao compila.
+ * The label the chip shows. A technology name does not translate, so there is
+ * only one. The `Record` forces the pair: a new id without a label will not
+ * compile.
  */
 export const STACK_LABELS: Record<StackId, string> = {
   react: "React",
@@ -107,7 +108,7 @@ export const STACK_LABELS: Record<StackId, string> = {
   "chrome-extension": "Chrome Extension APIs",
 };
 
-/** Assuntos. Vale para `work` e `blog`. */
+/** Subjects. Used by `work` and `blog`. */
 export const TAGS = [
   "architecture",
   "infrastructure",
@@ -123,7 +124,7 @@ export const TAGS = [
 
 export type TagId = (typeof TAGS)[number];
 
-/** Assunto traduz — o rotulo e por idioma. */
+/** A subject does translate — the label is per language. */
 export const TAG_LABELS: Record<TagId, Record<Locale, string>> = {
   architecture: { en: "Architecture", pt: "Arquitetura" },
   infrastructure: { en: "Infrastructure", pt: "Infraestrutura" },
