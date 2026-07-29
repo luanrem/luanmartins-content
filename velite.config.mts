@@ -72,6 +72,8 @@ const readIdentity = (): Identity | string => {
 interface MdNode {
   type: string;
   value?: string;
+  alt?: string | null;
+  url?: string;
   children?: MdNode[];
 }
 
@@ -98,9 +100,42 @@ const readBullets = (): Bullets => {
   };
 };
 
+/**
+ * Imagem no corpo sem texto alternativo. Acessibilidade e criterio de aceite no
+ * contrato do site, e uma imagem sem alt so da para pegar aqui — depois de
+ * virar HTML, ninguem mais olha.
+ */
+const imagesWithoutAlt = (): string[] => {
+  const walk = (node: MdNode): string[] => {
+    const here =
+      node.type === "image" && (node.alt ?? "").trim().length === 0
+        ? [node.url ?? "(sem url)"]
+        : [];
+    return [...here, ...(node.children ?? []).flatMap(walk)];
+  };
+  const root = context().file.mdast as unknown as MdNode | undefined;
+  return root == null ? [] : walk(root);
+};
+
 /* ---------------------------------------------------------------------------
    CAMPOS COMPARTILHADOS
    --------------------------------------------------------------------------- */
+
+/**
+ * A capa do item. `s.image()` copia o arquivo para a saida e devolve dimensoes
+ * e o placeholder de blur; o `alt` e campo separado e obrigatorio porque o
+ * `s.image()` nao tem onde guardar texto alternativo, e imagem sem alt nao
+ * passa no criterio de acessibilidade do site.
+ *
+ * O caminho e relativo ao proprio arquivo — a imagem mora na pasta do item.
+ */
+const coverField = () =>
+  s
+    .object({
+      src: s.image(),
+      alt: s.string().min(3).max(160),
+    })
+    .optional();
 
 /**
  * O slug nao usa `s.slug()`. A unicidade dela e global por escopo, e `en.mdx` e
@@ -244,12 +279,22 @@ const work = defineCollection({
         .default({}),
       /** Guardado e nunca exibido: alimenta o `lastmod` do sitemap. */
       updatedAt: s.isodate(),
+      cover: coverField(),
       content: s.markdown(),
     })
     .transform((data, ctx) => {
       const identity = readIdentity();
       if (typeof identity === "string") {
         ctx.addIssue({ code: "custom", message: identity, fatal: true });
+        return s.NEVER;
+      }
+      const noAlt = imagesWithoutAlt();
+      if (noAlt.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          fatal: true,
+          message: `imagem sem texto alternativo no corpo: ${noAlt.join(", ")}`,
+        });
         return s.NEVER;
       }
       return {
@@ -274,6 +319,7 @@ const blog = defineCollection({
       tags: tagsField(),
       /** Chaves de pasta de `work/`. A existencia e checada no `prepare`. */
       relatedWork: s.array(s.string().regex(KEY_RE)).default([]),
+      cover: coverField(),
       content: s.markdown(),
       metadata: s.metadata(),
     })
@@ -281,6 +327,15 @@ const blog = defineCollection({
       const identity = readIdentity();
       if (typeof identity === "string") {
         ctx.addIssue({ code: "custom", message: identity, fatal: true });
+        return s.NEVER;
+      }
+      const noAlt = imagesWithoutAlt();
+      if (noAlt.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          fatal: true,
+          message: `imagem sem texto alternativo no corpo: ${noAlt.join(", ")}`,
+        });
         return s.NEVER;
       }
       return {
@@ -347,14 +402,18 @@ export default defineConfig({
   strict: true,
 
   output: {
-    // Relativos a ESTE arquivo. O repositorio e baixado para `<site>/content/`,
-    // entao os dados caem em `<site>/content/.velite` e o asset no `public/` do
-    // site, um nivel acima.
+    // Tudo fica DENTRO do checkout, relativo a este arquivo. A alternativa
+    // obvia — apontar `assets` para o `public/` do site, um nivel acima — cria
+    // e escreve numa pasta fora do repositorio: no CI daqui isso vaza para o
+    // diretorio pai do runner, e localmente suja a pasta que contem o clone.
+    //
+    // O repositorio de conteudo produz um pacote autocontido; quem decide onde
+    // os arquivos moram e o site, que copia `.velite/static` para o `public/`
+    // dele antes do `next build`.
     data: ".velite",
-    assets: "../public/static",
+    assets: ".velite/static",
     base: "/static/",
-    // NUNCA ligar: `clean` faz rm -rf em `output.assets`, que aponta para o
-    // `public/` do repositorio do site.
+    // NUNCA ligar: `clean` faz rm -rf em `output.assets`.
     clean: false,
   },
 
@@ -417,6 +476,9 @@ export default defineConfig({
           tags: doc.tags.map((tag) => tag.id),
           stack: doc.stack.map((item) => item.id),
           links: doc.links,
+          // A PRESENCA da capa, e nao o arquivo: o `alt` traduz, mas um idioma
+          // com capa e o outro sem renderiza cartoes diferentes.
+          hasCover: doc.cover != null,
         });
       const base = group.find((doc) => doc.locale === DEFAULT_LOCALE);
       if (base == null) continue;
@@ -426,7 +488,7 @@ export default defineConfig({
           fingerprint(doc) !== fingerprint(base)
         ) {
           problems.push(
-            `${at("work", key, doc.locale)}: kind/order/featured/updatedAt/status.tone/tags/stack/links divergem de ${DEFAULT_LOCALE}.mdx`,
+            `${at("work", key, doc.locale)}: divergem de ${DEFAULT_LOCALE}.mdx em kind/order/featured/updatedAt/status.tone/tags/stack/links ou na presenca de cover`,
           );
         }
       }
