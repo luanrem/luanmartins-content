@@ -44,6 +44,9 @@ Se uma delas atrapalhar, **pare e pergunte** — não contorne.
 
 4. **Toda imagem tem texto alternativo.** No corpo e na capa. É critério de
    aceite de acessibilidade no site, e depois de virar HTML ninguém mais pega.
+   Imagem mora em `<tipo>/<chave>/img/`, referenciada por caminho relativo
+   (`./img/arquivo.png`) — nunca URL externa, senão o repositório deixa de
+   reconstruir o site sozinho.
 
 5. **Não mergear.** Merge na `main` dispara um deploy do site — é passo humano.
    Agente abre PR e para aí.

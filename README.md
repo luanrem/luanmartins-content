@@ -126,15 +126,16 @@ see the ground rules below.
 
 ## Images
 
-**Images live in the item's folder, next to the text that uses them.** They are
-committed here like any other content — the repository stays self-contained, so
-a checkout is everything needed to rebuild the site.
+**Images live in an `img/` folder inside the item, next to the text that uses
+them.** They are committed here like any other content — the repository stays
+self-contained, so a checkout is everything needed to rebuild the site.
 
 ```
 work/hermes/
   en.mdx
   pt.mdx
-  architecture.png     ← referenced by both
+  img/
+    architecture.png     ← referenced by both
 ```
 
 Two ways to use one, and both take a **relative path**:
@@ -143,14 +144,14 @@ Two ways to use one, and both take a **relative path**:
 URL is rewritten to a content-hashed public path:
 
 ```markdown
-![Diagram of the four pipeline stages](./architecture.png)
+![Diagram of the four pipeline stages](./img/architecture.png)
 ```
 
 **As a cover**, in the frontmatter — for the card and for social previews:
 
 ```yaml
 cover:
-  src: ./architecture.png
+  src: ./img/architecture.png
   alt: Diagram of the four pipeline stages
 ```
 
@@ -169,6 +170,10 @@ Rules the build enforces:
 
 The same image referenced from several files is stored once — the output name
 is a hash of the contents.
+
+The `img/` folder is a convention, not a rule the build enforces: paths are
+resolved relative to the `.mdx` file, so any subfolder works. Keeping it uniform
+is what makes an item's folder readable at a glance.
 
 Everything generated lands in `.velite/`, which is git-ignored. Nothing is
 written outside this repository.
