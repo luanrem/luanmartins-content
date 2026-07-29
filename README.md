@@ -186,6 +186,27 @@ is what makes an item's folder readable at a glance.
 Everything generated lands in `.velite/`, which is git-ignored. Nothing is
 written outside this repository.
 
+## Code blocks
+
+A fenced block is highlighted **at build time**, so the site ships no
+highlighter to the browser. Tag the fence with the language:
+
+````markdown
+```ts
+const threshold = mean(canary.map(({ score }) => score)) + ALERT_MARGIN;
+```
+````
+
+The colours are not decided here. Every token comes out as
+`color:var(--shiki-token-…)` and never as a fixed colour — this repository says
+"keyword", "string", "comment", and the site answers with a colour in each of
+its two themes. A fence with no language is still marked up, as plain text, so
+there is a single shape to style.
+
+The language has to be one [Shiki](https://shiki.style) knows. A fence tagged
+with something that is not a language fails the build instead of quietly
+rendering as plain text.
+
 ## Languages
 
 **`en` is required. `pt` is optional.** An item missing `en.mdx` fails the build;
@@ -250,6 +271,7 @@ pnpm build    # the same gate CI runs
 - A cover present in one language of an item and missing in the other
 - A body image the build cannot measure — a missing file, or one that is not an
   image
+- A code fence tagged with a language that does not exist
 
 Failures are reported all at once, with the path of each offending file.
 

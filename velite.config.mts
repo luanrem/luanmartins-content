@@ -10,6 +10,8 @@
  */
 import { readFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
+import rehypeShiki, { type RehypeShikiOptions } from "@shikijs/rehype";
+import { createCssVariablesTheme } from "shiki";
 import {
   context,
   defineCollection,
@@ -131,9 +133,10 @@ const imagesWithoutAlt = (): string[] => {
 /* ---------------------------------------------------------------------------
    THE BODY PIPELINE
 
-   What the body needs that Velite does not do on its own, handed to every
-   `s.markdown()` through `markdownOptions`. None of it decides how anything
-   looks — the site owns the appearance (ADR-0001).
+   Two things the body needs that Velite does not do on its own, both handed to
+   every `s.markdown()` through `markdownOptions`. Neither of them decides how
+   anything looks: one adds dimensions, the other adds classes and CSS variable
+   names. The site owns the appearance (ADR-0001).
    --------------------------------------------------------------------------- */
 
 /**
@@ -183,8 +186,45 @@ const remarkImageSize =
     );
   };
 
+/**
+ * Highlight at build time, so the site ships no highlighter to the browser.
+ *
+ * The theme is Shiki's CSS variables theme: every token comes out as
+ * `color:var(--shiki-token-…)` and never as a fixed colour. This repository does
+ * not pick a palette — it says "keyword", "string", "comment", and the site
+ * answers with a colour in each of its two themes.
+ *
+ * `langs: []` with `lazy` loads a grammar only when a fence asks for it, which
+ * also means a language that does not exist fails the build instead of quietly
+ * rendering as plain text. A fence with no language at all is still marked up,
+ * as `text`, so the site has one shape to style.
+ */
+const shikiOptions = {
+  theme: createCssVariablesTheme({
+    name: "css-variables",
+    variablePrefix: "--shiki-",
+    // No defaults on purpose: a fallback colour here would be a palette.
+    variableDefaults: {},
+  }),
+  langs: [],
+  lazy: true,
+  defaultLanguage: "text",
+  // Shiki replaces the `language-*` class markdown wrote. Putting it back keeps
+  // the fence's own word available to whoever renders it.
+  addLanguageClass: true,
+} satisfies RehypeShikiOptions;
+
+/** What Velite calls a `Pluggable` — a plugin, or a plugin with its options. */
+type RehypePlugin = NonNullable<MarkdownOptions["rehypePlugins"]>[number];
+
 const markdownOptions = {
   remarkPlugins: [remarkImageSize],
+  // Velite's .d.ts inlines unified's types instead of importing them, so the
+  // `Plugin` @shikijs/rehype exports and the `Pluggable` Velite expects are two
+  // identical declarations TypeScript refuses to unify. The cast bridges the two
+  // copies and nothing else — the options above are checked against Shiki's own
+  // type, one line up.
+  rehypePlugins: [[rehypeShiki, shikiOptions] as unknown as RehypePlugin],
 } satisfies MarkdownOptions;
 
 /* ---------------------------------------------------------------------------
