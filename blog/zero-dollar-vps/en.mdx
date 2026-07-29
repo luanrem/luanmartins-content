@@ -1,0 +1,62 @@
+---
+title: Running production on a $0/month VPS
+description: What a free-tier ARM instance actually gives you, what it takes away, and why the constraint made the architecture better instead of worse.
+slug: zero-dollar-vps
+date: 2026-06-12
+tags: [infrastructure, self-hosting]
+relatedWork: [hermes]
+---
+
+The cheapest server I run costs nothing, and it has been up longer than some
+things I have been paid to maintain. That is less impressive than it sounds —
+and more interesting than it sounds, for a reason that took me a while to
+notice.
+
+## What free actually means
+
+A free-tier ARM instance gives you a real machine: a handful of cores, a few
+gigabytes of memory, a persistent disk, a public address. What it does not give
+you is headroom. There is no burst capacity to hide behind, no autoscaling to
+paper over a bad query, and no support contract when it goes sideways.
+
+That sounds like a list of disadvantages. In practice it is a list of things
+that would have let me avoid decisions.
+
+## The constraint that helped
+
+Hermes classifies job listings with an LLM. The obvious architecture keeps a
+model resident and pipes work to it. On this box that is simply not available —
+the memory is not there. So classification became a per-item API call, which
+forced two things I would otherwise have skipped:
+
+**Deduplication had to come first.** If every call costs money, paying twice for
+the same listing under two different titles becomes visible immediately. On a
+machine with headroom, that waste would have hidden inside a batch job for
+months.
+
+**The unit of work had to be small.** A per-item call fails per item. A resident
+model processing a batch fails as a batch, and then you are rerunning
+twenty minutes of work to fix one bad record.
+
+Neither of these is a clever idea. They are both things I know to do and would
+not have bothered doing, because nothing would have punished me for skipping
+them.
+
+## What it takes away
+
+I want to be honest about the other side, because "constraints are good" is the
+kind of thing that is true right up until it is a rationalization.
+
+Rebuilds are slow. Anything that would normally be a parallel build is serial
+here, and I feel it every time. There is no failover: when the instance goes
+down, the pipeline is down, and the only reason that is acceptable is that
+nobody but me depends on it. And I have spent evenings tuning memory limits that
+would have been a dropdown on a paid tier — time that bought me nothing except
+the machine staying up.
+
+## The part that generalizes
+
+The lesson is not "use free hardware". It is that **a budget you cannot exceed
+turns architecture decisions into forced choices**, and forced choices get made.
+On a generous machine, the same decisions stay open forever, because nothing
+ever makes you close them.

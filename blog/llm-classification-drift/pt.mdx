@@ -1,0 +1,60 @@
+---
+title: O classificador que parou de funcionar em silêncio
+description: Um LLM que pontua a mesma entrada de forma diferente entre versões não é um bug que gera erro. Como eu descobri, e o que mudei para o próximo ser barulhento.
+slug: o-classificador-que-parou-de-funcionar
+date: 2026-07-02
+tags: [ai, automation]
+relatedWork: [hermes]
+---
+
+Por umas três semanas meu pipeline de alertas de vaga esteve pior que inútil, e
+todas as partes dele reportaram sucesso o tempo inteiro.
+
+## O sintoma
+
+Menos alertas. Não zero — isso eu teria notado. Só menos, de um jeito
+perfeitamente compatível com um mês fraco. Os scrapers reportavam contagens
+normais. O banco enchia. Nada dava erro.
+
+O que acabou chamando minha atenção foi uma vaga que vi em outro lugar e que eu
+sabia que deveria ter pontuado alto. Fui olhar por que não tinha.
+
+## O que estava acontecendo
+
+O prompt de classificação pede que o modelo pontue o anúncio contra uma rubrica
+e devolva um número com uma linha de justificativa. Vinha devolvendo números
+sensatos havia meses. Aí o modelo por trás mudou — mesmo apelido, pesos
+diferentes — e a distribuição de notas caiu uns quinze pontos.
+
+Nada disso é erro. O modelo continuava devolvendo um número válido. Tudo que
+vinha depois continuava funcionando perfeitamente sobre um número que já não
+significava o que o limiar assumia.
+
+## Por que o histórico me salvou
+
+A única coisa que eu tinha feito certo foi guardar toda classificação: o
+anúncio, a nota, a justificativa e o identificador do modelo. Essa tabela foi o
+que transformou uma impressão vaga num gráfico. Notas contra a mesma rubrica,
+plotadas ao longo do tempo, com um degrau bem visível numa data específica.
+
+Sem essa tabela eu teria uma suspeita e nenhuma forma de testá-la.
+
+## O que mudou
+
+**O modelo está fixado numa versão explícita.** O apelido era o problema inteiro
+— ele apontava para outra coisa sem avisar. Conveniência que muda comportamento
+sem te contar não é conveniência.
+
+**Um conjunto pequeno de anúncios é pontuado em toda execução, como canário.**
+Eles nunca mudam, então a nota deles também não deveria. Quando ela se move mais
+que alguns pontos, a execução falha alto em vez de filtrar diferente em silêncio.
+
+**O limiar é derivado, não fixo.** Ele agora flutua contra a distribuição do
+canário, então um deslocamento uniforme para de mudar calado o que passa.
+
+## O que eu vivo reaprendendo
+
+Sistema que envolve modelo falha num modo que o monitoramento comum não tem nome
+para: **está tudo no ar, está tudo rápido, e as respostas pioraram.** Check de
+uptime não vê. Taxa de erro não vê. O que vê é um registro do que o sistema
+costumava dizer, guardado por tempo suficiente para comparar.
