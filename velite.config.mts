@@ -283,6 +283,12 @@ const work = defineCollection({
       updatedAt: s.isodate(),
       cover: coverField(),
       content: s.markdown(),
+      /**
+       * Derived, nobody fills it in. The case-study page shows reading time in
+       * the meta line — it is the only cost signal there, because `updatedAt`
+       * is deliberately never displayed.
+       */
+      metadata: s.metadata(),
     })
     .transform((data, ctx) => {
       const identity = readIdentity();

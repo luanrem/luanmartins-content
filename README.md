@@ -100,6 +100,7 @@ Projects. Routed at `/<locale>/work/<slug>`.
 | `stack`                     | `STACK[]`                   | yes      |                                                                                                                             |
 | `links.repo` / `links.live` | url                         | no       |                                                                                                                             |
 | `updatedAt`                 | date                        | yes      | **Stored, never displayed.** Feeds the sitemap's `lastmod`, so the page signals freshness without carrying a visible date    |
+| `metadata`                  | derived                     | —        | Reading time and word count. Nobody fills it in. The case-study page shows reading time — it is the only cost signal there, since `updatedAt` never renders |
 
 The body is the write-up, in full markdown.
 
