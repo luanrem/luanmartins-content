@@ -1,0 +1,16 @@
+---
+company: X-Team
+role: Full-Stack Software Engineer
+location: Remote
+note: Multi-tenant education platform, v2 architecture.
+startDate: "2025-06"
+endDate: "2025-11"
+stack: [react, nextjs, typescript, tanstack-query, tailwindcss, shadcn-ui]
+---
+
+- Led the architecture of v2 of a multi-tenant education platform, introducing feature flags and A/B testing so changes could roll out incrementally instead of all at once.
+- Built a search module over 60,000+ records that stayed at 60fps, keeping the UI responsive at a data size where naive rendering falls apart.
+- Built an ingestion pipeline handling 130,000+ nightly user updates, using queue-based async throttling and explicit error handling to keep the database from overloading and to stop silent synchronization failures.
+- Cut bundle size with route-level code-splitting via `next/dynamic`, using `@next/bundle-analyzer` to find the dead weight first.
+- Built an internal component library on shadcn/ui and Tailwind CSS, enforcing accessibility standards and composition patterns so feature work stopped re-inventing primitives.
+- Raised the engineering bar by facilitating architecture discussions, leading code reviews, and pushing React Query patterns and clean separation of concerns.
