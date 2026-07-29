@@ -1,0 +1,59 @@
+---
+title: Hermes
+subtitle: Pipeline de monitoramento de vagas
+headline: Um pipeline que coleta vagas, classifica com um LLM e avisa — rodando 24/7 num VPS ARM de $0/mês.
+slug: hermes
+kind: case-study
+status:
+  text: Rodando em produção
+  tone: live
+order: 1
+featured: true
+tags: [automation, ai, backend]
+stack: [kestra, nestjs, postgres, openrouter, docker]
+links:
+  repo: https://github.com/luanrem/hermes
+updatedAt: 2026-07-20
+---
+
+## Por que ele existe
+
+Quadro de vagas é mangueira de incêndio. A maioria dos anúncios é ruído para
+qualquer pessoa específica, e o sinal se deteriora rápido — uma vaga boa
+encontrada três dias depois é uma vaga que outra pessoa já pegou. Eu queria que
+a filtragem acontecesse enquanto eu dormia, e queria saber quando ela quebrasse.
+
+## Como funciona
+
+São quatro estágios, orquestrados pelo Kestra:
+
+1. **Coletar.** Scrapers agendados puxam anúncios de algumas fontes e normalizam
+   tudo para um formato único antes de qualquer outra coisa encostar neles.
+2. **Deduplicar.** A mesma vaga é publicada em vários quadros com títulos
+   ligeiramente diferentes. Um hash de conteúdo mais uma comparação aproximada
+   de título junta as duplicatas.
+3. **Classificar.** Cada anúncio sobrevivente vai para um LLM via OpenRouter com
+   uma rubrica — senioridade, sobreposição de stack, política de remoto, sinais
+   ruins na redação. O modelo devolve uma nota e uma linha de justificativa.
+4. **Avisar.** O que passa do limiar chega até mim com a justificativa junto,
+   então em segundos eu sei se o classificador acertou.
+
+O PostgreSQL guarda os anúncios e o histórico de classificação. Guardar o
+histórico é o que torna o classificador auditável: quando uma nota parece
+errada, dá para ver o que o modelo viu.
+
+## O que teve de interessante
+
+**Custo foi restrição de projeto, não consequência.** A coisa toda roda num VPS
+ARM de tier gratuito. Esse orçamento elimina manter um modelo residente, então a
+classificação é uma chamada de API por item, com cache agressivo — o estágio de
+deduplicação existe em parte para não pagar duas vezes pelo mesmo anúncio.
+
+**Deriva de classificador é real.** O mesmo prompt no mesmo anúncio não pontua
+igual entre versões de modelo. Fixar o modelo ajudou; guardar o histórico de
+notas foi o que me deixou perceber o problema.
+
+**Falha precisa ser barulhenta.** Um scraper que devolve zero resultados em
+silêncio é idêntico a um dia parado no mercado. Todo estágio reporta uma
+contagem, e contagem zero onde costuma haver número é tratada como falha, não
+como resultado vazio.

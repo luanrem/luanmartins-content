@@ -1,0 +1,48 @@
+---
+title: Homelab infrastructure
+subtitle: Self-hosted production environment
+headline: Self-hosted production environment, rebuilt from zero with infrastructure as code.
+slug: homelab-infrastructure
+kind: overview
+status:
+  text: Running at home
+  tone: live
+order: 2
+featured: true
+tags: [infrastructure, self-hosting, automation]
+stack: [proxmox, terraform, ansible, traefik, tailscale, docker]
+updatedAt: 2026-06-30
+---
+
+## What it is
+
+A dozen services running on hardware I own, treated with the same discipline as
+something I would be paged for. Proxmox underneath, Terraform describing the
+virtual machines, Ansible configuring them, Traefik terminating TLS and routing,
+Tailscale making the whole thing reachable without exposing anything to the open
+internet.
+
+## Why rebuild it from zero
+
+The first version was built by hand over about two years, and it worked — right
+up until I needed to change something. Nothing was written down, so every change
+started with archaeology: reading config files to remember what past-me had
+decided and why.
+
+The rebuild had one rule: **if it is not in a repository, it does not exist.**
+A machine that cannot be recreated from code is a machine I am afraid to touch,
+and a machine I am afraid to touch is one I stop maintaining.
+
+## What it buys
+
+- Recreating any service is a command, not an afternoon.
+- Certificates renew without me remembering they exist.
+- Nothing is exposed publicly — access goes through Tailscale, so there is no
+  port-forwarding rule to get wrong.
+- Upgrades are testable. I can stand up a copy, break it, and throw it away.
+
+## What I would do differently
+
+Backups came last, and they should have come first. There was a stretch where
+the infrastructure was reproducible but the data in it was not — which is the
+worst of both worlds, because it feels safe.
