@@ -37,6 +37,20 @@ anúncio, a nota, a justificativa e o identificador do modelo. Essa tabela foi o
 que transformou uma impressão vaga num gráfico. Notas contra a mesma rubrica,
 plotadas ao longo do tempo, com um degrau bem visível numa data específica.
 
+```sql
+-- Uma linha por semana por modelo, todas contra a mesma rubrica. O degrau são
+-- três semanas de mean_score quinze pontos abaixo de toda semana anterior.
+select
+  date_trunc('week', classified_at) as week,
+  model,
+  count(*)                          as listings,
+  round(avg(score)::numeric, 1)     as mean_score
+from classification
+where rubric_version = 3
+group by week, model
+order by week;
+```
+
 Sem essa tabela eu teria uma suspeita e nenhuma forma de testá-la.
 
 ## O que mudou
@@ -45,12 +59,56 @@ Sem essa tabela eu teria uma suspeita e nenhuma forma de testá-la.
 — ele apontava para outra coisa sem avisar. Conveniência que muda comportamento
 sem te contar não é conveniência.
 
+Fixar é só metade. A resposta diz qual modelo de fato respondeu, e uma execução
+que recebe resposta de algo diferente do que pediu para aí mesmo, em vez de
+gravar uma nota que significa outra coisa:
+
+```ts
+const response = await openrouter.chat({
+  model: classifier.model, // um snapshot com data no config, nunca um apelido
+  messages: [rubricPrompt(listing)],
+});
+
+if (response.model !== classifier.model) {
+  throw new ClassifierError(
+    `pedi ${classifier.model}, respondeu ${response.model}`,
+  );
+}
+```
+
 **Um conjunto pequeno de anúncios é pontuado em toda execução, como canário.**
 Eles nunca mudam, então a nota deles também não deveria. Quando ela se move mais
 que alguns pontos, a execução falha alto em vez de filtrar diferente em silêncio.
 
 **O limiar é derivado, não fixo.** Ele agora flutua contra a distribuição do
-canário, então um deslocamento uniforme para de mudar calado o que passa.
+canário, então um deslocamento uniforme para de mudar calado o que passa. As
+duas coisas saem das mesmas poucas chamadas no início de toda execução:
+
+```ts
+const canary = await Promise.all(
+  CANARY_LISTINGS.map(async (listing) => ({
+    id: listing.id,
+    baseline: listing.baseline,
+    score: (await classify(listing)).score,
+  })),
+);
+
+const drifted = canary.filter(
+  ({ baseline, score }) => Math.abs(score - baseline) > CANARY_TOLERANCE,
+);
+
+if (drifted.length > 0) {
+  throw new ClassifierError(
+    `canário se moveu: ${drifted
+      .map(({ id, baseline, score }) => `${id} ${baseline} -> ${score}`)
+      .join(", ")}`,
+  );
+}
+
+// Dentro da tolerância, os mesmos números definem a régua da execução. Um
+// deslocamento uniforme move a régua junto — o que o 70 fixo nunca fez.
+const threshold = mean(canary.map(({ score }) => score)) + ALERT_MARGIN;
+```
 
 ## O que eu vivo reaprendendo
 

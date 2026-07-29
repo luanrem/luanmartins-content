@@ -37,6 +37,20 @@ the score, the reason, and the model identifier. That table is what turned a
 vague feeling into a chart. Scores against the same rubric, plotted over time,
 with a very visible step down on a specific date.
 
+```sql
+-- One row per week per model, all against the same rubric. The step down is
+-- three weeks of mean_score sitting fifteen points below every week before it.
+select
+  date_trunc('week', classified_at) as week,
+  model,
+  count(*)                          as listings,
+  round(avg(score)::numeric, 1)     as mean_score
+from classification
+where rubric_version = 3
+group by week, model
+order by week;
+```
+
 Without that table I would have had a suspicion and no way to test it.
 
 ## What changed
@@ -45,12 +59,56 @@ Without that table I would have had a suspicion and no way to test it.
 it silently pointed at something new. Convenience that changes behavior without
 telling you is not convenience.
 
+Pinning is only half of it. The response says which model actually answered, and
+a run that gets an answer from something other than what it asked for stops
+right there instead of writing a score that means something else:
+
+```ts
+const response = await openrouter.chat({
+  model: classifier.model, // a dated snapshot in config, never an alias
+  messages: [rubricPrompt(listing)],
+});
+
+if (response.model !== classifier.model) {
+  throw new ClassifierError(
+    `asked for ${classifier.model}, answered by ${response.model}`,
+  );
+}
+```
+
 **A small set of listings is scored on every run as a canary.** They never
 change, so their score should not either. When it moves more than a few points,
 the run fails loudly instead of quietly filtering differently.
 
 **The threshold is derived, not hardcoded.** It now floats against the canary
-distribution, so a uniform shift stops silently changing what gets through.
+distribution, so a uniform shift stops silently changing what gets through. Both
+of those come out of the same few calls at the top of every run:
+
+```ts
+const canary = await Promise.all(
+  CANARY_LISTINGS.map(async (listing) => ({
+    id: listing.id,
+    baseline: listing.baseline,
+    score: (await classify(listing)).score,
+  })),
+);
+
+const drifted = canary.filter(
+  ({ baseline, score }) => Math.abs(score - baseline) > CANARY_TOLERANCE,
+);
+
+if (drifted.length > 0) {
+  throw new ClassifierError(
+    `canary drifted: ${drifted
+      .map(({ id, baseline, score }) => `${id} ${baseline} -> ${score}`)
+      .join(", ")}`,
+  );
+}
+
+// Within tolerance, the same numbers set the bar for the run. A uniform shift
+// moves the bar with it, which is what the hardcoded 70 never did.
+const threshold = mean(canary.map(({ score }) => score)) + ALERT_MARGIN;
+```
 
 ## The thing I keep relearning
 
