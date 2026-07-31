@@ -1,0 +1,236 @@
+---
+title: Rodando o Hermes numa VPS de $0/mês
+description: Instalando o Hermes numa VPS ARM gratuita da Oracle usando Coolify.
+slug: hermes-na-vps
+date: 2026-07-31
+tags: [self-hosting, infrastructure, ai]
+---
+
+Eu não costumo seguir hype. Ouvi muita gente falando do Hermes e o meu primeiro instinto foi ignorar, o mesmo instinto que estava certo sobre o OpenClaw, que hoje quase ninguém mais menciona. Instalei mesmo assim.
+
+O Hermes é um agente de inteligência artificial autônomo, auto-hospedado e de código aberto. O que o diferencia é a memória persistente: ele não recomeça do zero a cada conversa e vai se aprimorando conforme o uso. Veio depois do OpenClaw e mudou o jeito que essas ferramentas organizam essa memória.
+
+## Por que
+
+O hype passou rápido. Hoje não se ouve mais falar nem do OpenClaw nem do Hermes, e a impressão é que as pessoas esqueceram que eles existem. Ou perceberam que não são bala de prata para tudo e não vão gerenciar uma empresa sozinhos. Só que "não resolve tudo" é bem diferente de "não resolve nada".
+
+O que eu queria dele era específico. Rodar cron jobs que me devolvem dados sem eu precisar pedir, começando por pesquisa de vagas. Fazer buscas na internet de forma rápida, sem abrir dez abas. E expor as minhas próprias ferramentas como API, para conseguir uma resposta delas com um pedido em texto em vez de abrir uma por uma. Esse último é também o motivo mais honesto: eu queria uma desculpa real para aprender a desenvolver MCPs e usar eles em alguma coisa que eu abro todo dia.
+
+Nada disso exige um agente que se gerencia sozinho. Exige um que esteja sempre ligado, e é aí que entra a VPS.
+
+## Onde ele roda
+
+A instância é uma VPS ARM da Oracle, no plano gratuito: 2 núcleos, 12GB de RAM e 200GB de armazenamento por $0 por mês. Sobra espaço para o Hermes e para várias outras coisas rodando ao lado dele.
+
+Nada garante que a Oracle mantenha esse plano, e eu não colocaria nada profissional aqui, onde não existe failover nem contrato de suporte. Mas para projeto pessoal, e principalmente para quem quer aprender infra sem pagar por isso, é recurso demais para recusar.
+
+Como criar e configurar a VPS é assunto para outro post, que eu ainda vou escrever. Adianto uma coisa: eu segui o tutorial do [Tiago Matos](https://www.youtube.com/@tiagomatosweb), que é didático e cobre bem o caminho, mas a parte de gerenciar o SSH na Oracle tem uma pegadinha que me custou tempo. É o tipo de detalhe que merece o próprio texto.
+
+## Como instalei
+
+Em cima da VPS eu rodo o Coolify. Já passei por Portainer e Dockge, e o Proxmox continua sendo o meu preferido, mesmo resolvendo outra camada, a de máquinas virtuais em vez da de containers. O Coolify ganhou por ser simples: tem um catálogo de aplicações prontas, cuida do deploy e deixa a atualização a um clique de distância. Ele usa o Traefik como proxy reverso, então o certificado SSL sai automático e a única coisa que sobra para mim é apontar o domínio.
+
+![Catálogo de aplicações prontas do Coolify](./img/coolify-apps.gif)
+
+O Hermes está nesse catálogo, então a instalação em si é escolher e clicar. O template sobe dois containers: o agente e a [hermes-webui](https://github.com/nesquena/hermes-webui), que é a interface para gerenciar ele sem depender do terminal.
+
+O detalhe é que, do jeito que vem, não funciona. Os dois containers sobem, ficam verdes no painel, e a webui não enxerga o agente. Foram quatro mudanças no compose até as duas pontas se conversarem.
+
+## O que eu tive que mudar
+
+**O agente não expunha API nenhuma.** O template não liga o servidor de API do agente, e a webui não tem para onde apontar. Liguei o servidor do lado do agente:
+
+```yaml
+- API_SERVER_ENABLED=true
+- API_SERVER_HOST=0.0.0.0
+- API_SERVER_PORT=8642
+- 'API_SERVER_KEY=${API_SERVER_KEY}'
+```
+
+E dei o endereço para a webui:
+
+```yaml
+- 'HERMES_API_URL=http://hermes-agent:8642'
+```
+
+O `hermes-agent` ali não é um domínio, é o nome do serviço no compose, que vira nome de host dentro da rede dos containers. Isso quer dizer que a porta 8642 nunca precisa sair para a internet: quem fala com ela é o container do lado.
+
+**O volume compartilhado estava como somente leitura.** O template monta o diretório do agente dentro da webui terminando em `:ro`. Tirei o `:ro` para que a webui consiga escrever ali, e não só ler.
+
+**As imagens vinham pinadas.** O agente vem preso a um digest `sha256`, e a webui a uma versão exata. Isso é ótimo para reprodutibilidade e péssimo para o meu caso: o botão de atualizar do Coolify baixa exatamente a mesma imagem de novo, para sempre. Troquei as duas por `latest`. É uma escolha consciente e tem preço, que eu comento mais abaixo.
+
+**Telegram.** Adicionei `TELEGRAM_BOT_TOKEN` e `TELEGRAM_ALLOWED_USERS`, que é como eu falo com ele no dia a dia. Essa é a peça que faz o "sempre ligado" valer alguma coisa: eu mando o pedido pelo celular e a resposta chega sem eu precisar abrir o notebook.
+
+## O compose final
+
+```yaml
+services:
+  hermes-agent:
+    image: 'nousresearch/hermes-agent:latest'
+    command: 'gateway run'
+    environment:
+      - HERMES_HOME=/home/hermes/.hermes
+      - HERMES_UID=1000
+      - HERMES_GID=1000
+      - 'OPENROUTER_API_KEY=${OPENROUTER_API_KEY}'
+      - 'ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}'
+      - 'OPENAI_API_KEY=${OPENAI_API_KEY}'
+      - 'GOOGLE_API_KEY=${GOOGLE_API_KEY}'
+      - 'TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}'
+      - 'TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}'
+      - API_SERVER_ENABLED=true
+      - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_PORT=8642
+      - 'API_SERVER_KEY=${API_SERVER_KEY}'
+    volumes:
+      - 'hermes-home:/home/hermes/.hermes'
+      - 'hermes-agent-src:/opt/hermes'
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'test -d /home/hermes/.hermes || exit 1'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  hermes-webui:
+    image: 'ghcr.io/nesquena/hermes-webui:latest'
+    depends_on:
+      - hermes-agent
+    environment:
+      - SERVICE_URL_HERMESWEBUI_8787
+      - HERMES_WEBUI_HOST=0.0.0.0
+      - HERMES_WEBUI_PORT=8787
+      - HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui
+      - WANTED_UID=1000
+      - WANTED_GID=1000
+      - 'HERMES_WEBUI_PASSWORD=${SERVICE_PASSWORD_HERMESWEBUI}'
+      - 'HERMES_API_URL=http://hermes-agent:8642'
+    volumes:
+      - 'hermes-home:/home/hermeswebui/.hermes'
+      - 'hermes-agent-src:/home/hermeswebui/.hermes/hermes-agent'
+      - 'hermes-workspace:/workspace'
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - '-f'
+        - 'http://127.0.0.1:8787/health'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+```
+
+## As variáveis de ambiente
+
+Nenhum valor sensível mora no compose. Tudo que é chave ou senha entra pelas variáveis de ambiente, que no Coolify ficam na tela do próprio serviço:
+
+```bash
+# geradas e preenchidas pelo Coolify
+SERVICE_FQDN_HERMESWEBUI=hermes.seudominio.com
+SERVICE_FQDN_HERMESWEBUI_8787=hermes.seudominio.com:8787
+SERVICE_URL_HERMESWEBUI=https://hermes.seudominio.com
+SERVICE_URL_HERMESWEBUI_8787=https://hermes.seudominio.com:8787
+SERVICE_PASSWORD_HERMESWEBUI=
+HERMES_WEBUI_PASSWORD=${SERVICE_PASSWORD_HERMESWEBUI}
+
+# os provedores de modelo, o que você usar
+OPENROUTER_API_KEY=
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GOOGLE_API_KEY=
+
+# a ponte entre a webui e o agente
+API_SERVER_KEY=
+
+# o Telegram
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USERS=
+```
+
+As que começam com `SERVICE_` são convenção do Coolify: ele mesmo gera a senha, resolve o domínio e pede o certificado. As outras são todas suas.
+
+![Tela de variáveis de ambiente do Coolify, com todos os valores mascarados](./img/hermes-variables.png)
+
+## Para que serve a webui
+
+Eu quase deixei a webui de lado, achando que seria só uma tela bonita em cima de uma coisa que já funcionava pelo Telegram. Errei.
+
+O que ela entrega, e o terminal não, é um lugar só. O Hermes atende em vários cantos ao mesmo tempo: uma conversa que começou no Telegram, outra que veio de um canal do Slack, outra que é um cron job rodando de madrugada sem ninguém pedir nada. Acompanhar isso sem a webui significa caçar histórico em três aplicativos diferentes. Ali tudo cai na mesma lista, marcado com a origem, e eu abro qualquer uma das conversas para ler o que foi feito. É também onde eu vejo as skills que já criei e onde eu confiro se os cron jobs rodaram.
+
+![Página de chats da hermes-webui, com as conversas de Telegram e Slack na mesma lista e uma delas aberta](./img/hermes-web-ui.png)
+
+## Como atualizo
+
+Com `latest` nas duas imagens, atualizar virou redeploy no Coolify. Ele puxa a imagem nova e sobe os containers de novo. O estado não mora dentro deles, e sim nos volumes `hermes-home`, `hermes-agent-src` e `hermes-workspace`, então a memória e a configuração atravessam o update sem eu fazer nada.
+
+O preço é o que eu troquei lá em cima. `latest` não me avisa o que mudou, e no dia que um update quebrar alguma coisa eu não tenho para onde voltar sem antes descobrir na mão qual era a versão anterior. Aceitei porque isso aqui é projeto pessoal e o custo de ficar um fim de semana fora do ar é zero.
+
+## O dia que a conta chegou
+
+Um mês depois, a webui sumiu. Não caiu com erro na tela, sumiu: nem aparecia mais no seletor de terminal do Coolify. Nos logs, uma linha só:
+
+```text
+rm: cannot remove '/tmp/hermes-agent-build/...': Permission denied
+```
+
+O boot da webui faz o seguinte: ela precisa das dependências do agente para funcionar, então copia o código do volume `hermes-agent-src` para `/tmp/hermes-agent-build`, instala ali e no fim tenta limpar esse `/tmp`. A cópia foi criada com dono `root` e a limpeza roda como UID 1000. A limpeza falha, o passo de boot não fecha, e o container entra em crash-loop. Container que não sobe não aparece no seletor, e é por isso que ele tinha sumido em vez de dar erro.
+
+Esse erro eu já conhecia: era o mesmo que o `:ro` causava lá atrás, na instalação. Só que dessa vez o `:ro` não estava mais lá, então a causa era outra. Duas coisas tinham mudado sozinhas no meio do caminho.
+
+**A imagem nova.** Passou mais de um mês desde o último redeploy, e o `latest` trouxe uma versão em que o processo de instalação da webui mudou. Dava para perceber pelo `node_modules` e pelo `eslint` aparecendo dentro do `/tmp`, coisas que antes nem existiam ali.
+
+**O volume com estado velho.** O `hermes-agent-src` continuava populado pela versão antiga do código. Versão nova lendo arquivo antigo, com dono diferente, e a limpeza esbarrando em arquivo que ela não tinha permissão de remover.
+
+## Como resolvi
+
+**Primeiro, ler o log do recurso, não o terminal.** Os `rm: Permission denied` podem ser só barulho, e o que importa é saber se o container morre por causa deles ou se cai depois, por outro motivo. Quem responde isso é a última linha antes do restart, e ela está no log do recurso. O terminal, nesse ponto, nem existe mais para ser aberto.
+
+**Depois, esvaziar o volume do código.** O `hermes-agent-src` é o mesmo volume dos dois lados, e do lado do agente ele está montado em `/opt/hermes`. O agente continuava de pé, então deu para fazer a limpeza pelo terminal dele.
+
+Antes de apagar qualquer coisa, olhar:
+
+```bash
+ls -la /opt/hermes
+```
+
+Isso mostra o que tem ali e, principalmente, de quem é cada arquivo. É onde dá para ver a mistura de donos que causa o problema, uma parte como `root` e outra como o usuário 1000.
+
+Aí o primeiro apagão, só do que é visível:
+
+```bash
+rm -rf /opt/hermes/*
+```
+
+O `-r` é para entrar nas pastas e o `-f` é para não parar perguntando a cada arquivo. E repare que eu apago o conteúdo, com a barra e o asterisco no fim, não o diretório: `/opt/hermes` é o ponto de montagem do volume, e se ele some o container perde o lugar onde o volume entra.
+
+Um `ls -la` de novo e o diretório parece vazio, mas não está. O `*` do shell não pega arquivo escondido, e o código do agente tem vários começando com ponto. Esses precisam de um segundo padrão:
+
+```bash
+rm -rf /opt/hermes/.[!.]*
+```
+
+Esse `.[!.]*` é feio e tem motivo. Ele quer dizer "um ponto, seguido de qualquer coisa que não seja outro ponto, seguido do resto do nome". Se eu escrevesse só `.*`, o padrão pegaria também `.` e `..`, que são o próprio diretório e o diretório pai. Um `rm -rf .*` é, na prática, um pedido para apagar tudo e ainda subir um nível. O `[!.]` está ali só para deixar esses dois de fora.
+
+Quando um dos dois padrões não encontra nada, o shell entrega o padrão literal para o `rm`, que reclama que o arquivo não existe. É barulho, não é erro, e é para isso que serve o `2>/dev/null`, que joga fora o que sai pelo canal de erro.
+
+Juntando tudo, vira a linha única que eu acabei rodando:
+
+```bash
+rm -rf /opt/hermes/* /opt/hermes/.[!.]* 2>/dev/null; ls -la /opt/hermes
+```
+
+O ponto e vírgula no meio é de propósito, e não um `&&`. Com `;` o `ls` roda de qualquer jeito, mesmo que o `rm` tenha reclamado de alguma coisa, e é justamente o resultado dele que eu quero ver no fim: um diretório sem nada além de `.` e `..`.
+
+Em seguida, redeploy. O agente repopula o `/opt/hermes` do zero, já na versão atual, e a webui reinstala em cima de código limpo. Foi o que resolveu, e o boot fechou na primeira tentativa.
+
+O terceiro passo ficou guardado: se limpar o volume não tivesse resolvido, seria sinal de que a versão nova da webui simplesmente não conversa mais com esse arranjo de dois containers, e a saída seria pinar os dois numa dupla de versões que eu sei que funcionava, a de junho.
+
+A raiz continua sendo o `latest`, e eu continuo achando que vale a pena para um projeto pessoal. Mas o segundo ingrediente é o que eu não tinha percebido antes: trocar a imagem sem limpar o que a imagem antiga deixou no volume é meio update.
+
+## Valeu a pena
+
+Voltando para o começo: eu instalei isso aqui desconfiado, achando que não serviria para muita coisa. Depois de um mês usando, posso dizer que a experiência como agente autônomo é boa de verdade.
+
+Não é um substituto para tudo que eu preciso, até porque ele cobra o meu tempo: eu gastei e ainda gasto boas horas olhando e testando features novas. Mas ele entrega o que promete.
+
+Aquele motivo mais honesto lá do começo eu também cumpri. Já fiz um MCP e conectei ao Hermes, e agora basta eu pedir uma atualização para ele buscar e resolver tudo sozinho. O melhor é que a resposta não traz só o resultado da API do MCP, mas também o que ele entendeu daquilo. Sobre esse MCP, e sobre o que vier depois dele, eu ainda vou escrever.
