@@ -1,40 +1,286 @@
 ---
 title: Populatte
-subtitle: Persistent form-fill mapping
-headline: A B2B Chrome extension for persistent form-fill mapping.
+subtitle: From Excel to the web
+headline: A B2B SaaS that fills web forms from spreadsheets — dashboard, API and browser extension, with a human in command.
 slug: populatte
-kind: overview
+kind: case-study
 status:
-  text: Private beta
-  tone: idle
+  text: In development
+  tone: live
 order: 3
 featured: true
-tags: [frontend, automation]
-stack: [chrome-extension, typescript, react]
-updatedAt: 2026-05-15
+tags: [architecture, automation, frontend, backend, testing]
+stack:
+  [
+    typescript,
+    nextjs,
+    react,
+    nestjs,
+    postgres,
+    drizzle,
+    zod,
+    clerk,
+    tailwindcss,
+    shadcn-ui,
+    tanstack-query,
+    chrome-extension,
+    wxt,
+    playwright,
+    jest,
+    docker,
+  ]
+updatedAt: 2026-08-03
+cover:
+  src: ./img/landing-hero.png
+  alt: Populatte's landing page, on a dark espresso background, titled "Stop typing forms. Have a coffee while Populatte fills them in."
 ---
 
-## The problem
+## The sentence I said with too much confidence
 
-Some teams spend their day copying the same record into the same three internal
-systems. The forms never match: different field names, different order, one of
-them split across two steps. Generic autofill gives up immediately, because it
-matches on field names that only agree by accident.
+A friend of mine owns a mining company. A good part of her administrative work is
+moving data into government forms — the kind of portal built in an era when nobody
+thought much about the person on the other side doing the typing. In a
+conversation, I said the classic programmer sentence: "that can't be hard to solve,
+it's just a robot that fills in the fields".
 
-## The approach
+Then I opened the forms.
 
-Populatte lets a person map it once. You point at a source, point at the target
-fields, and the mapping is saved for that site — so the second time is a click
-instead of twenty.
+It wasn't one form: it was several, chained together, some reloading the entire
+page after every field. And the data wasn't in a well-behaved spreadsheet with one
+row per record and a header on top. It was scattered across several sheets, each
+organized its own way: a matrix with the months of the year down the side, a tab
+where each row was a field rather than a record, loose cells acting as
+configuration, tabs that don't participate in any filling and exist only because
+someone once needed to check a calculation.
 
-It lives in the Chrome Side Panel API rather than a popup, which matters more
-than it sounds: a popup closes the moment you click into the page, which is
-exactly when you need it open.
+The "fill in the field" part is by far the easiest one. The real problem was
+something else, and it is two questions: **what does this spreadsheet mean?** and
+**where does each value go on the form?**
 
-## Where it stands
+Populatte was born from that, in mid-2025. The name is *populate* + *latte*: the
+idea is to invert the role of coffee at the office — instead of the fuel for
+pulling an all-nighter of typing, it goes back to being just a coffee while the
+tedious work happens on its own.
 
-Private beta with a handful of teams. The interesting problems so far have been
-about durability rather than features — forms change, and a mapping that
-silently points at a field that no longer exists is worse than no mapping at
-all. Detecting that and asking, instead of writing to the wrong place, is most
-of what the current work is about.
+## What it does
+
+A web dashboard where you create a project, upload the spreadsheets and say what
+each column means. A browser extension that, on the target site, learns where each
+value goes — you click the column, click the field, and that becomes a saved
+recipe. Then it's record by record: the extension fills, you check and submit.
+
+![Populatte's flow in six steps — upload, ingestion, meaning, capture, live fill and validation — split across the two mappings, inbound and outbound.](./img/architecture-flow.png)
+
+Notice the split in the diagram, because it is the single most important
+architectural decision in the project. There are **two mappings**, not one. The
+*inbound* one answers "what is this data" and lives in the spreadsheet. The
+*outbound* one answers "where does it go" and lives on the form. Treating both as
+one thing is the mistake that makes this kind of tool collapse on the second
+spreadsheet: you end up with a direct link between cell B7 and the `#txtProducao`
+field, and then someone inserts a row in Excel and everything breaks silently —
+which is the worst way to break, because the form still gets submitted, just
+wrong.
+
+## Why a copilot, not an autopilot
+
+The obvious question: if it can fill forms, why not fill everything by itself, no
+human at all?
+
+Two reasons, and the first is safety. This data is not trivial — it's a company's
+fiscal and operational data going into a government portal, and submitting is an
+act with consequences. I don't want the first version of a system of mine pressing
+that button. The second reason is that I want Populatte to work for any form, in
+any industry, not just the ones I've already seen. For that, someone has to teach
+the path at least once, and the only honest way to learn it is a person opening
+the page and pointing: *this piece of data goes in this field*.
+
+So v1 is deliberately a copilot. The extension fills, the person validates and
+submits, and the record is marked. Once many paths have been recorded, full
+automation becomes a small step — not a leap of faith.
+
+## The architecture
+
+![Populatte's architecture diagram: a Next.js dashboard and a Chrome extension talking to a layered NestJS API, which persists to PostgreSQL via Drizzle; the extension fills the target form in the DOM.](./img/architecture-system.png)
+
+Three applications in one monorepo, all TypeScript, with a shared types package in
+the middle. That package matters more than it looks: the type of a field — what it
+is, where its value comes from, how it should be written — is defined exactly once
+and travels through all three applications. When I change that contract, the
+compiler shows me every place that has to change with it, including inside the
+extension. I'm on the second major data-model rewrite of this project, and without
+that it would be an archaeology exercise every time.
+
+### The dashboard
+
+Next.js 16 with the App Router and React 19, TanStack Query on the client,
+shadcn/ui on top of Tailwind. The part I like most isn't a technology: it's the
+fact that the entire theme lives in tokens — the "espresso" browns, the gold of
+the fill button, the status colors of the fill lifecycle. No component knows a
+color. There's a `/design-system` page that renders every primitive with all its
+variants, and it's the reference for any new screen. That's the difference between
+a design system and a folder of components.
+
+Clerk handles authentication, and that was a focus decision: auth is a solved
+problem, full of tedious security details, and I wanted to spend my time on the
+problem nobody has solved yet.
+
+### The API
+
+NestJS, with actual Clean Architecture — core, infrastructure and presentation.
+It's a choice that looks like overkill in a personal project, and I chose it on
+purpose: NestJS pushes you toward well-structured code from the first line, and
+since this project will live for years and go through big data-model changes, I
+preferred paying for structure upfront over paying for maintenance later. The
+domain core knows no database, no HTTP, no Drizzle — it declares repository
+interfaces and infrastructure has to implement them.
+
+It paid off better than I expected precisely during refactors: when I replaced the
+whole field-type vocabulary, the rules that mattered lived in a handful of domain
+files, testable without booting anything. (There is one dependency-rule violation
+I haven't paid off yet: one core use case imports the ingestion service from
+infrastructure. I know it's there, it's in my backlog, and I'd rather write that
+here than pretend the ruler is perfect.)
+
+Each spreadsheet row lives as JSONB in PostgreSQL, with Drizzle on top. Zod
+validates everything coming in, and in one specific spot it does more than
+validation: the schema that accepts field edits is strict, so any attempt to send
+an attribute that should be immutable is rejected at the API's edge, not three
+layers deeper. Uploaded files are checked by their actual magic bytes — an `.xlsx`
+is a ZIP, an old `.xls` is an OLE2 container — because trusting the file extension
+is trusting whatever name the user gave the file.
+
+### The extension
+
+Manifest V3, built with WXT, with the React UI in Chrome's Side Panel — not in a
+popup. That difference is the whole product: a popup closes the instant you click
+the page, which is exactly the moment you need it open to point at a field.
+
+Manifest V3 forces you to live in three isolated contexts that share no memory:
+the panel (UI), the background service worker (token, API calls, per-tab state)
+and the content script (the only one that touches the page's DOM). Everything
+between them is typed message passing. And the service worker can be killed by the
+browser at any moment, so nothing important is allowed to live only in its memory.
+
+## The hard part is not the filling
+
+### Understanding the spreadsheet
+
+![The "Data meaning" screen: the spreadsheet grid on the left with the selected column outlined, and on the right the editor for the "Valor de compra" field with type Number, format Currency, and the file's original format.](./img/meaning-editor.png)
+
+This is the screen that consumed the most project time, and it answers the first
+question. When a spreadsheet comes in, the system tries to figure out on its own
+the format of each tab (is it a monthly matrix? a plain table? a transposed
+list?), what each column is, and where each field's value comes from. Every
+proposal carries a confidence level, and whatever lands below the threshold shows
+up flagged with a "review?" instead of faking certainty. Cells with formula errors
+don't count as type evidence — they become a reason to ask for review.
+
+The separation that took me a while to see is between **type** and **format**.
+Type is what the cell *is*: text, number, date, boolean. Format is how it *shows
+itself*: currency, percentage, date, accounting, and so on — the same twelve
+categories as Excel's "Format cells" dialog, because that's the language the
+person on the other side already speaks. `R$ 78.990,00` is a number displayed as
+currency; treating "currency" as a type seems to work right up until you need to
+add two of them.
+
+Once everything is labeled, the result becomes a project template, anchored to the
+header texts. On the next upload of the same spreadsheet, if the file's signature
+matches exactly, the meaning is reapplied automatically — next month doesn't start
+from zero. If it doesn't match, it doesn't guess: it falls back to detection and
+lets the person decide. And edits save themselves as you type, because this is a screen where nobody should
+have to remember a save button.
+
+One decision holds all of this together: every column gets a normalized key at
+ingestion time, and that key **never changes**. It's the single thread connecting
+the stored data, the meaning the person assigned, and the fill step at the far
+end. No foreign key enforces that, so immutability is enforced by domain invariant
+and by a strict schema at the edge.
+
+### Writing into a DOM that isn't mine
+
+Filling happens live, field by field, on the real page. No generating a file for
+the site to import: the form is the source of truth, and it's where the person
+checks the result. Which means the executor has to deal with the world as it is:
+
+- **Portuguese decimals.** `1500.5` must become `1500,5`. But no thousands
+  separator and no fixed precision — the same code path carries a year (`2024`)
+  and a document number, and "pretty formatting" would destroy the data.
+- **Radio by value.** A column holding `+` or `-` has to check the right button
+  within the group. It looks up the `value` attribute and, failing that, falls
+  back to the text of the associated label.
+- **Fields that don't notice they were filled.** Writing straight to `.value`
+  doesn't tell React, and the value vanishes on the next render. Writes go through
+  the native prototype setter and dispatch the events the page expects — which
+  makes both a modern form and a legacy portal take notice.
+- **Selectors that age.** During capture, selectors are generated ignoring
+  framework classes and hashed classes, which change on every build, and each step
+  stores a fallback. Before filling, the panel validates every selector against
+  the open page and shows which ones it couldn't find — because a mapping that
+  silently points at a field that no longer exists is worse than no mapping at
+  all.
+
+Steps can be marked optional; a required step that fails aborts the rest and
+reports exactly which step broke and why. The record is marked as an error, with
+the message, instead of being counted as done.
+
+### Connecting the extension without sharing a session
+
+An extension doesn't share cookies with the dashboard, and I wasn't going to ask
+for anyone's password inside a side panel. The flow is a pairing code: logged into
+the dashboard, you generate a six-digit code, type it into the extension, and it
+exchanges the code for a token of its own. The code lives for five minutes, is
+single-use, generating a new one invalidates the previous one, and repeated
+failures lock attempts out for a while.
+
+One detail I ended up liking: the API accepts two kinds of token, Clerk's and the
+extension's. Instead of trying to validate and seeing what happens, the guard
+looks at the algorithm in the token's header and knows immediately whose token it
+is — which avoids both a noisy log and a verification attempt that could never
+succeed.
+
+## How I test this without depending on the government's site
+
+Testing a fill engine is annoying for the expected reason: the target is a site
+that isn't mine, requires login, and that I definitely don't want to hammer with
+automated tests.
+
+The solution was an offline lab in Playwright. It bundles the extension's **real
+executor** — the same file that runs in production, not a copy — and runs it
+against locally served forms. One of them is an offline replica of a real
+government form, generated by a script from a saved page, with scripts stripped
+and postbacks neutralized, preserving the quirky HTML and the accents. Seven
+scenarios run today, and they cover exactly the rules that scare me: Portuguese
+decimals, radio by value, a required step failing and aborting the rest.
+
+The rest of the API has unit and integration tests in Jest, concentrated where the
+rules are: format detection, a sheet's readiness, the immutable key, template
+reapplication. The local database runs in Docker, so every machine gets the same
+Postgres.
+
+## Where it stands today
+
+![A project detail screen in Populatte, with the "frota-veiculos.xlsx" import flagged as "Meaning: pending" and the mappings block still empty.](./img/project-detail.png)
+
+It works end to end, on my machine, with real data: upload the spreadsheet, detect
+the format, label the fields, capture the form's fields through the extension and
+fill a record. That has been validated both on a test form and against the offline
+replica of the real government form.
+
+What doesn't exist yet: it isn't deployed, nobody outside has used it, and several
+dashboard screens are still honest placeholders — team, billing, the overview
+panel. The extension works, but hasn't been through design yet; its UI is the
+structure, not the finish. There's no billing, no invites, no plan tiers.
+
+And, to be transparent about why it's paused right now: I'm traveling through
+Europe. It's not an abandoned project, it's a paused one — the latest batch of
+fixes is sitting on a branch waiting for me to come back.
+
+## What comes next
+
+Deploy and an MVP in front of real people, aiming to close that by December 2026.
+The order is: ship it, get the first real user filling her forms end to end, and
+only then look at what I've deferred — filling forms that reload the page on every
+step, repeatable step groups for tables, and the guarantee of never submitting the
+same record twice.
+
+After that, and only after that, the autopilot.
