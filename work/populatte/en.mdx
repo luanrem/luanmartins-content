@@ -29,7 +29,7 @@ stack:
     jest,
     docker,
   ]
-updatedAt: 2026-08-03
+updatedAt: 2026-08-05
 cover:
   src: ./img/landing-hero.png
   alt: Populatte's landing page, on a dark espresso background, titled "Stop typing forms. Have a coffee while Populatte fills them in."
@@ -115,8 +115,14 @@ Next.js 16 with the App Router and React 19, TanStack Query on the client,
 shadcn/ui on top of Tailwind. The part I like most isn't even a technology: it's
 that the whole theme lives in tokens. The espresso browns, the gold of the fill
 button, the status colors of the fill lifecycle, all of it has a name and lives in
-one place. No component knows a color. There's a `/design-system` page that shows
-every primitive with all its variants, and it's the reference for any new screen.
+one place. No component knows a color.
+
+![Populatte's project list filtered by search, with two cards showing status, entity, URL count and a progress bar.](./img/projects-list.png)
+
+There's a `/design-system` page that shows every primitive with all its variants,
+and it's the reference for any new screen.
+
+![Populatte's design system page, the living catalog of components, showing StatusBadge and ProgressMeter variants.](./img/design-system.png)
 
 Clerk handles authentication, and that was a focus call: auth is a solved problem,
 full of tedious security details, and I'd rather spend my time on the problem
@@ -163,7 +169,7 @@ at any moment, so nothing important is allowed to live only in its memory.
 
 ### Understanding the spreadsheet
 
-![The data meaning screen: the spreadsheet grid on the left, with the selected column outlined, and on the right the editor for the "Valor de compra" field, with type number, format currency, and the file's original format.](./img/meaning-editor.png)
+![Top of the data meaning screen: file tabs, format detected as open table, the record identity strip and the start of the grid that mirrors the spreadsheet.](./img/meaning-screen.png)
 
 This is the screen that took the most project time, and it answers the first
 question. When a spreadsheet comes in, the system tries to figure out on its own
@@ -179,6 +185,8 @@ currency, percentage, date, accounting, the same twelve categories as Excel's
 format cells dialog, because that's the language the person on the other side
 already speaks. `R$ 78.990,00` is a number displayed as currency. Treating
 currency as a type seems to work until the day you need to add two of them.
+
+![The spreadsheet grid on the left, with the selected column outlined, and on the right the field panel with type, format and the labeled and review badges of each column.](./img/meaning-editor.png)
 
 Once everything is labeled, the result becomes a project template, anchored to the
 header texts. On the next upload of the same spreadsheet, if the file's signature

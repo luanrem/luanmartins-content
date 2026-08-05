@@ -29,7 +29,7 @@ stack:
     jest,
     docker,
   ]
-updatedAt: 2026-08-03
+updatedAt: 2026-08-05
 cover:
   src: ./img/landing-hero.png
   alt: Página inicial do Populatte, em fundo espresso escuro, com o título "Pare de digitar formulários. Tome um café enquanto o Populatte preenche."
@@ -115,8 +115,14 @@ Next.js 16 com App Router e React 19, TanStack Query no cliente, shadcn/ui em ci
 de Tailwind. A parte que eu mais gosto nem é tecnologia: é o tema viver inteiro em
 tokens. Os marrons de espresso, o dourado do botão de preencher, as cores de status
 do ciclo de preenchimento, tudo tem nome e mora num lugar só. Nenhum componente
-conhece uma cor. Existe uma página `/design-system` que mostra cada primitivo com
-todas as variações, e ela é a referência para qualquer tela nova.
+conhece uma cor.
+
+![Lista de projetos do Populatte filtrada pela busca, com dois cards mostrando status, entidade, contagem de URLs e barra de progresso.](./img/projects-list.png)
+
+Existe uma página `/design-system` que mostra cada primitivo com todas as
+variações, e ela é a referência para qualquer tela nova.
+
+![Página do design system do Populatte, catálogo vivo dos componentes, mostrando as variações de StatusBadge e ProgressMeter.](./img/design-system.png)
 
 Clerk cuida da autenticação, e essa foi uma escolha de foco: autenticação é
 problema resolvido, cheio de detalhe chato de segurança, e eu preferia gastar meu
@@ -164,7 +170,7 @@ a qualquer momento, então nada importante pode viver só na memória dele.
 
 ### Entender a planilha
 
-![Tela de significado dos dados: a grade da planilha à esquerda, com a coluna selecionada destacada, e à direita o editor do campo Valor de compra, com tipo número, formato moeda e o formato original do arquivo.](./img/meaning-editor.png)
+![Topo da tela de significado dos dados: abas do arquivo, formato detectado como tabela aberta, a faixa de identidade do registro e o começo da grade fiel à planilha.](./img/meaning-screen.png)
 
 Esta é a tela que mais consumiu tempo de projeto, e é ela que responde à primeira
 pergunta. Quando uma planilha entra, o sistema tenta descobrir sozinho o formato de
@@ -180,6 +186,8 @@ porcentagem, data, contábil, as mesmas doze categorias da janela de formatar
 células do Excel, porque essa é a linguagem que a pessoa do outro lado já fala.
 `R$ 78.990,00` é um número que aparece como moeda. Tratar moeda como tipo parece
 funcionar até o dia em que você precisa somar dois.
+
+![Grade da planilha à esquerda, com a coluna selecionada contornada, e à direita o painel de campos com tipo, formato e os selos de rotulado e revisar de cada coluna.](./img/meaning-editor.png)
 
 Quando tudo está rotulado, o resultado vira um template do projeto, ancorado no
 texto dos cabeçalhos. No próximo upload da mesma planilha, se a assinatura do
