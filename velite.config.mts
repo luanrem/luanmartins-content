@@ -551,6 +551,18 @@ const site = defineCollection({
      * it carries — would stay traceable forever. Only the link lives here.
      */
     resumeUrl: s.string().url().startsWith("https://"),
+    /**
+     * Where the images live, for the same reason the CV does: binaries in a
+     * public, permanent history stay traceable forever. The bucket behind this
+     * URL mirrors the repository's structure minus the `img/` segment —
+     * `<assetsBaseUrl>/<type>/<key>/<file>` — and the build joins the pieces
+     * with `/`, which is why a trailing slash is rejected.
+     */
+    assetsBaseUrl: s
+      .string()
+      .url()
+      .startsWith("https://")
+      .regex(/[^/]$/, "no trailing slash — the build appends /<type>/<key>/<file>"),
   }),
 });
 
