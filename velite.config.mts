@@ -167,28 +167,27 @@ const itemPath = (
  * parser: this config is compiled and run by whichever repository invokes it
  * (this one and the site), and a YAML library would have to be a dependency of
  * both. The pattern accepts exactly the shape the site collection's schema
- * enforces — double quotes, https, no trailing slash — so the two readers can
- * never disagree quietly: anything else fails loudly right here.
+ * enforces — double quotes, https, no trailing slash — plus the two things an
+ * editor adds without asking, a trailing comment and a CR; anything else
+ * fails loudly right here rather than parsing differently in the two places.
  */
-const ASSETS_BASE_RE = /^assetsBaseUrl:\s*"(https:\/\/[^"\s]*[^"\s/])"[ \t]*$/m;
+const ASSETS_BASE_RE =
+  /^assetsBaseUrl:[ \t]*"(https:\/\/[^"\s]*[^"\s/])"[ \t]*(?:#.*)?\r?$/m;
 
-const baseUrlByRoot = new Map<string, Promise<string>>();
-
-const assetsBaseUrl = (root: string): Promise<string> => {
-  let pending = baseUrlByRoot.get(root);
-  if (pending == null) {
-    pending = readFile(resolve(root, "site.yml"), "utf8").then((text) => {
-      const match = ASSETS_BASE_RE.exec(text);
-      if (match == null) {
-        throw new Error(
-          `site.yml needs assetsBaseUrl: "https://…" — double quotes, no trailing slash; every image resolves against it`,
-        );
-      }
-      return match[1];
-    });
-    baseUrlByRoot.set(root, pending);
+/**
+ * Read per call, not memoized: site.yml is a few hundred bytes and a build
+ * reads it a couple dozen times, while `velite dev` must see an edit on the
+ * next rebuild instead of serving whatever value the process started with.
+ */
+const assetsBaseUrl = async (root: string): Promise<string> => {
+  const text = await readFile(resolve(root, "site.yml"), "utf8");
+  const match = ASSETS_BASE_RE.exec(text);
+  if (match == null) {
+    throw new Error(
+      `site.yml needs assetsBaseUrl: "https://…" — double quotes, no trailing slash; every image resolves against it`,
+    );
   }
-  return pending;
+  return match[1];
 };
 
 /**
@@ -215,26 +214,55 @@ const imageUrl = async (
 /** Everything `getImageMetadata` measures: dimensions plus the blur fields. */
 type RemoteImage = Omit<Image, "src">;
 
+/**
+ * The whole chain of an error, not just its head: `fetch` buries the part
+ * worth reading — ENOTFOUND, ECONNRESET, a TLS complaint — in `cause`, and
+ * reporting only the head prints "fetch failed" twelve times for a typo in
+ * the hostname.
+ */
+const describeError = (error: unknown): string => {
+  const parts: string[] = [];
+  for (let current = error; current instanceof Error; current = current.cause) {
+    parts.push(current.message);
+  }
+  return parts.length > 0 ? parts.join(" — ") : String(error);
+};
+
 const FETCH_ATTEMPTS = 3;
+
+/** Per attempt, and covering the body too — a CDN that goes mute mid-download
+ *  must become a diagnosable failure, not a build that hangs into CI's cap. */
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** The 4xx that mean "not now" rather than "not there". */
+const RETRIABLE_STATUS = new Set([408, 429]);
 
 /**
  * GET rather than HEAD, because the bytes are the point. A 4xx is a file that
- * was never uploaded and retrying cannot fix it; a 5xx or a network error gets
- * two more tries, so a CDN hiccup does not fail a content PR.
+ * was never uploaded and retrying cannot fix it — except 408 and 429, which
+ * are the CDN pushing back and join 5xx and network errors in getting two
+ * more tries, with backoff so the retry is not the same second the CDN just
+ * refused. Reading the body lives inside the `try` on purpose: a connection
+ * dropped mid-download is as retriable as one never opened.
  */
 const fetchImage = async (url: string): Promise<Buffer> => {
   let failure = "";
   for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt += 1) {
-    let response: Response;
-    try {
-      response = await fetch(url);
-    } catch (error) {
-      failure = (error as Error).message;
-      continue;
+    if (attempt > 1) {
+      await new Promise((done) => setTimeout(done, 500 * 2 ** (attempt - 1)));
     }
-    if (response.ok) return Buffer.from(await response.arrayBuffer());
-    failure = `the CDN answered ${response.status}`;
-    if (response.status < 500) break;
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+      failure = `the CDN answered ${response.status}`;
+      if (response.status < 500 && !RETRIABLE_STATUS.has(response.status)) {
+        break;
+      }
+    } catch (error) {
+      failure = describeError(error);
+    }
   }
   throw new Error(failure);
 };
@@ -305,9 +333,7 @@ const remarkImagesFromCdn =
         try {
           ({ width, height } = await measureImage(url));
         } catch (error) {
-          throw new Error(
-            `could not fetch '${url}': ${(error as Error).message}`,
-          );
+          throw new Error(`could not fetch '${url}': ${describeError(error)}`);
         }
         node.url = url;
         node.data = { ...node.data, hProperties: { ...node.data?.hProperties, width, height } };
@@ -450,21 +476,28 @@ const coverField = () =>
       alt: s.string().min(3).max(160),
     })
     .transform(async (data, ctx) => {
-      const url = await imageUrl(context().file.path, data.src);
+      const fail = (message: string) => {
+        ctx.addIssue({ code: "custom", message, fatal: true });
+        return s.NEVER;
+      };
+      // Everything async stays behind a catch that turns the problem into THIS
+      // file's issue. A rejection escaping a transform aborts the whole build
+      // with one line that names no file — and swallows every issue the other
+      // files had already collected.
+      let url: string | null;
+      try {
+        url = await imageUrl(context().file.path, data.src);
+      } catch (error) {
+        return fail(`cover '${data.src}': ${describeError(error)}`);
+      }
       if (url == null) {
         // Unreachable behind the regex above; TypeScript cannot know that.
-        ctx.addIssue({ code: "custom", message: REF_HELP, fatal: true });
-        return s.NEVER;
+        return fail(REF_HELP);
       }
       try {
         return { src: { src: url, ...(await measureImage(url)) }, alt: data.alt };
       } catch (error) {
-        ctx.addIssue({
-          code: "custom",
-          fatal: true,
-          message: `could not fetch '${url}': ${(error as Error).message}`,
-        });
-        return s.NEVER;
+        return fail(`could not fetch '${url}': ${describeError(error)}`);
       }
     })
     .optional();
