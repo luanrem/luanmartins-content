@@ -17,8 +17,8 @@ import {
   defineCollection,
   defineConfig,
   getImageMetadata,
-  isRelativePath,
   s,
+  type Image,
   type MarkdownOptions,
 } from "velite";
 import {
@@ -113,21 +113,171 @@ const readBullets = (): Bullets => {
   };
 };
 
+// The alt-text gate for body images does NOT live here on `context().file.mdast`
+// — that tree is a re-parse of the content without the GFM extensions, and an
+// image inside a footnote definition does not even exist in it (the line parses
+// as a childless `definition`). The gate lives in `remarkImagesFromCdn`, which
+// walks the tree that actually renders.
+
+/* ---------------------------------------------------------------------------
+   IMAGES ON THE CDN
+
+   Images are not committed here. They live in the bucket behind `assetsBaseUrl`
+   (site.yml), keyed by the structure this repository already has, minus the
+   `img/` segment the reference carries:
+
+     work/populatte/en.mdx  +  ./img/landing-hero.png
+       →  <assetsBaseUrl>/work/populatte/landing-hero.png
+
+   The reference in the text stays RELATIVE on purpose: no `.mdx` file ever
+   carries the CDN's hostname, so moving the images is one line in site.yml,
+   not an edit in every text. The build resolves each reference, downloads the
+   file once, and fails loudly when the CDN does not have it — the same
+   missing-image guarantee the repository had while the files lived here.
+
+   Downloading is not only validation. `width`/`height` (and the cover's blur
+   placeholder) come out of the bytes, and nothing else can measure them once
+   the files are not in the checkout. The price is that the build now needs
+   the network — accepted: it runs in CI and on Vercel, which always have it,
+   and a CDN outage turns into a red build, never into a broken page.
+   --------------------------------------------------------------------------- */
+
+/** `<root>/<type>/<key>/<locale>.mdx` — the two folders above the file. */
+const itemPath = (
+  mdxPath: string,
+): { root: string; type: string; key: string } => {
+  const keyDir = dirname(mdxPath);
+  const typeDir = dirname(keyDir);
+  return { root: dirname(typeDir), type: basename(typeDir), key: basename(keyDir) };
+};
+
 /**
- * Body images without alt text. Accessibility is an acceptance criterion in the
- * site's contract, and an image without alt can only be caught here — once it
- * becomes HTML, nobody looks again.
+ * `assetsBaseUrl` read straight from site.yml with a pattern, not a YAML
+ * parser: this config is compiled and run by whichever repository invokes it
+ * (this one and the site), and a YAML library would have to be a dependency of
+ * both. The pattern accepts exactly the shape the site collection's schema
+ * enforces — double quotes, https, no trailing slash — plus the two things an
+ * editor adds without asking, a trailing comment and a CR; anything else
+ * fails loudly right here rather than parsing differently in the two places.
  */
-const imagesWithoutAlt = (): string[] => {
-  const walk = (node: MdNode): string[] => {
-    const here =
-      node.type === "image" && (node.alt ?? "").trim().length === 0
-        ? [node.url ?? "(sem url)"]
-        : [];
-    return [...here, ...(node.children ?? []).flatMap(walk)];
-  };
-  const root = context().file.mdast as unknown as MdNode | undefined;
-  return root == null ? [] : walk(root);
+const ASSETS_BASE_RE =
+  /^assetsBaseUrl:[ \t]*"(https:\/\/[^"\s]*[^"\s/])"[ \t]*(?:#.*)?\r?$/m;
+
+/**
+ * Read per call, not memoized: site.yml is a few hundred bytes and a build
+ * reads it a couple dozen times, while `velite dev` must see an edit on the
+ * next rebuild instead of serving whatever value the process started with.
+ */
+const assetsBaseUrl = async (root: string): Promise<string> => {
+  const text = await readFile(resolve(root, "site.yml"), "utf8");
+  const match = ASSETS_BASE_RE.exec(text);
+  if (match == null) {
+    throw new Error(
+      `site.yml needs assetsBaseUrl: "https://…" — double quotes, no trailing slash; every image resolves against it`,
+    );
+  }
+  return match[1];
+};
+
+/**
+ * What a reference may look like: one `img/` folder, one file name, and only
+ * characters that survive being pasted into a URL verbatim — the bucket key
+ * must match the reference byte for byte. The first character is a letter or
+ * digit, so a name cannot masquerade as a dotfile or an option.
+ */
+const IMG_REF_RE = /^\.\/img\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
+
+const REF_HELP =
+  "an image is referenced as ./img/<file> (letters, digits, dot, hyphen and underscore, starting with a letter or digit) and served from the CDN — see the README";
+
+/** Raw HTML that would carry media past the pipeline. */
+const MEDIA_TAG_RE = /<(?:img|picture|source|video|audio|iframe|embed|object)\b/i;
+
+/** The public URL a reference resolves to, or null when it is not a reference. */
+const imageUrl = async (
+  mdxPath: string,
+  ref: string,
+): Promise<string | null> => {
+  const name = IMG_REF_RE.exec(ref)?.[1];
+  if (name == null) return null;
+  const { root, type, key } = itemPath(mdxPath);
+  return `${await assetsBaseUrl(root)}/${type}/${key}/${name}`;
+};
+
+/** Everything `getImageMetadata` measures: dimensions plus the blur fields. */
+type RemoteImage = Omit<Image, "src">;
+
+/**
+ * The whole chain of an error, not just its head: `fetch` buries the part
+ * worth reading — ENOTFOUND, ECONNRESET, a TLS complaint — in `cause`, and
+ * reporting only the head prints "fetch failed" twelve times for a typo in
+ * the hostname.
+ */
+const describeError = (error: unknown): string => {
+  const parts: string[] = [];
+  for (let current = error; current instanceof Error; current = current.cause) {
+    parts.push(current.message);
+  }
+  return parts.length > 0 ? parts.join(" — ") : String(error);
+};
+
+const FETCH_ATTEMPTS = 3;
+
+/** Per attempt, and covering the body too — a CDN that goes mute mid-download
+ *  must become a diagnosable failure, not a build that hangs into CI's cap. */
+const FETCH_TIMEOUT_MS = 30_000;
+
+/** The 4xx that mean "not now" rather than "not there". */
+const RETRIABLE_STATUS = new Set([408, 429]);
+
+/**
+ * GET rather than HEAD, because the bytes are the point. A 4xx is a file that
+ * was never uploaded and retrying cannot fix it — except 408 and 429, which
+ * are the CDN pushing back and join 5xx and network errors in getting two
+ * more tries, with backoff so the retry is not the same second the CDN just
+ * refused. Reading the body lives inside the `try` on purpose: a connection
+ * dropped mid-download is as retriable as one never opened.
+ */
+const fetchImage = async (url: string): Promise<Buffer> => {
+  let failure = "";
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      await new Promise((done) => setTimeout(done, 500 * 2 ** (attempt - 1)));
+    }
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+      failure = `the CDN answered ${response.status}`;
+      if (response.status < 500 && !RETRIABLE_STATUS.has(response.status)) {
+        break;
+      }
+    } catch (error) {
+      failure = describeError(error);
+    }
+  }
+  throw new Error(failure);
+};
+
+/**
+ * One download per URL per process, shared by the languages of an item and by
+ * the cover. The failure is cached too — in `velite dev`, a file uploaded
+ * after the first miss needs a restart to be seen.
+ */
+const measured = new Map<string, Promise<RemoteImage>>();
+
+const measureImage = (url: string): Promise<RemoteImage> => {
+  let pending = measured.get(url);
+  if (pending == null) {
+    pending = fetchImage(url).then(async (bytes) => {
+      const metadata = await getImageMetadata(bytes);
+      if (metadata == null) throw new Error("the file is not a measurable image");
+      return metadata;
+    });
+    measured.set(url, pending);
+  }
+  return pending;
 };
 
 /* ---------------------------------------------------------------------------
@@ -135,53 +285,81 @@ const imagesWithoutAlt = (): string[] => {
 
    Three things the body needs that Velite does not do on its own, all handed to
    every `s.markdown()` through `markdownOptions`. None of them decides how
-   anything looks: one adds dimensions, one adds an anchor to every section, and
-   the last adds classes and CSS variable names. The site owns the appearance
-   (ADR-0001).
+   anything looks: one swaps every image reference for its CDN URL and adds
+   dimensions, one adds an anchor to every section, and the last adds classes
+   and CSS variable names. The site owns the appearance (ADR-0001).
    --------------------------------------------------------------------------- */
 
 /**
- * Writes `width` and `height` on every body image — the same measurement
- * `s.image()` already does for the cover, applied to the body, so the text does
- * not jump when the image finishes loading.
+ * Rewrites every body image to its CDN URL and writes `width` and `height` on
+ * it, so the text does not jump when the image finishes loading.
  *
  * It is a REMARK plugin on purpose. Velite pushes its `rehypeCopyLinkedFiles`
- * ahead of any rehype plugin we pass (verified in the 0.4.0 dist), so by the
- * time rehype runs the URL is already the hashed `/static/...` one and the file
- * on disk would have to be found again. Here the URL is still `./img/foo.png`,
- * relative to the `.mdx` being read. `rehypeCopyLinkedFiles` only rewrites
- * `src`, so the dimensions survive it untouched.
+ * ahead of any rehype plugin we pass (verified in the 0.4.0 dist), and that
+ * plugin treats a relative `src` as a local file to copy — a file this
+ * repository no longer has. Here the URL is still `./img/<file>`; by the time
+ * rehype runs it is absolute, and `rehypeCopyLinkedFiles` leaves it alone.
  */
-const remarkImageSize =
+const remarkImagesFromCdn =
   () =>
   async (tree: MdNode, file: { path?: string }): Promise<void> => {
     const images: MdNode[] = [];
+    const problems: string[] = [];
     const walk = (node: MdNode): void => {
-      if (node.type === "image") images.push(node);
+      if (node.type === "image") {
+        // The alt gate lives here — on the tree that renders — because
+        // accessibility is an acceptance criterion on the site and once the
+        // body is HTML nobody looks again. (`context().file.mdast` cannot be
+        // trusted for this: it is re-parsed without GFM, and an image inside a
+        // footnote definition is absent from it.)
+        if ((node.alt ?? "").trim().length === 0) {
+          problems.push(`image without alt text: ${node.url ?? "(no url)"}`);
+        }
+        images.push(node);
+      }
+      // The two ways an image can dodge the rewrite, closed explicitly: a
+      // reference-style image resolves through a definition this plugin never
+      // touches, and raw HTML is opaque to remark — either one would ship an
+      // unvalidated, unmeasured URL past the one invariant this pipeline has.
+      if (node.type === "imageReference") {
+        problems.push(
+          `reference-style image '![${node.alt ?? ""}][…]' — use the inline form: ${REF_HELP}`,
+        );
+      }
+      if (node.type === "html" && MEDIA_TAG_RE.test(node.value ?? "")) {
+        problems.push(
+          `raw HTML media (<img>, <video>, …) is invisible to the image pipeline — use markdown image syntax: ${REF_HELP}`,
+        );
+      }
       for (const child of node.children ?? []) walk(child);
     };
     walk(tree);
+    // Everything wrong with the tree in one throw, before any download: the
+    // author sees the full list at once, and no bytes move for a file that is
+    // failing anyway.
+    if (problems.length > 0) {
+      throw new Error(problems.join("\n  "));
+    }
 
-    const from = dirname(file.path ?? ".");
+    const path = file.path ?? ".";
     await Promise.all(
       images.map(async (node) => {
-        const url = node.url ?? "";
-        // Same predicate `rehypeCopyLinkedFiles` uses to decide what it owns:
-        // an external URL is not ours to measure, and the schema forbids one.
-        if (!isRelativePath(url)) return;
-        // `./img/foo.png?v=2` and `#anchor` are the path plus noise.
-        const path = resolve(from, url.split(/[?#]/)[0]);
+        const ref = node.url ?? "";
+        const url = await imageUrl(path, ref);
+        if (url == null) {
+          // Loud rather than silent: an external URL is nobody's here to
+          // validate or measure, and a misshapen relative one would ship as a
+          // broken image nobody looks at once it is HTML.
+          throw new Error(`'${ref}' — ${REF_HELP}`);
+        }
         let width: number;
         let height: number;
         try {
-          const metadata = await getImageMetadata(await readFile(path));
-          if (metadata == null) throw new Error("no dimensions in the file");
-          ({ width, height } = metadata);
-        } catch (err) {
-          // Loud rather than silent: an unmeasurable image is a body that jumps
-          // on load, and nobody looks at it again once it is HTML.
-          throw new Error(`could not measure '${url}': ${(err as Error).message}`);
+          ({ width, height } = await measureImage(url));
+        } catch (error) {
+          throw new Error(`could not fetch '${url}': ${describeError(error)}`);
         }
+        node.url = url;
         node.data = { ...node.data, hProperties: { ...node.data?.hProperties, width, height } };
       }),
     );
@@ -291,7 +469,7 @@ const shikiOptions = {
 type RehypePlugin = NonNullable<MarkdownOptions["rehypePlugins"]>[number];
 
 const markdownOptions = {
-  remarkPlugins: [remarkImageSize],
+  remarkPlugins: [remarkImagesFromCdn],
   // Velite's .d.ts inlines unified's types instead of importing them, so the
   // `Plugin` @shikijs/rehype exports and the `Pluggable` Velite expects are two
   // identical declarations TypeScript refuses to unify. The cast bridges the two
@@ -308,19 +486,43 @@ const markdownOptions = {
    --------------------------------------------------------------------------- */
 
 /**
- * The item's cover. `s.image()` copies the file to the output and returns
- * dimensions plus the blur placeholder; `alt` is a separate, required field
- * because `s.image()` has nowhere to store alt text, and an image without alt
- * does not meet the site's accessibility criterion.
- *
- * The path is relative to the file itself — the image lives in the item's
- * `img/` folder.
+ * The item's cover. The reference is the same `./img/<file>` shape the body
+ * uses; the build resolves it against the CDN and returns the URL with
+ * dimensions plus the blur placeholder — the exact object `s.image()` used to
+ * produce, so the site keeps rendering it without layout shift. `alt` is a
+ * separate, required field because an image without alt does not meet the
+ * site's accessibility criterion.
  */
 const coverField = () =>
   s
     .object({
-      src: s.image(),
+      src: s.string().regex(IMG_REF_RE, REF_HELP),
       alt: s.string().min(3).max(160),
+    })
+    .transform(async (data, ctx) => {
+      const fail = (message: string) => {
+        ctx.addIssue({ code: "custom", message, fatal: true });
+        return s.NEVER;
+      };
+      // Everything async stays behind a catch that turns the problem into THIS
+      // file's issue. A rejection escaping a transform aborts the whole build
+      // with one line that names no file — and swallows every issue the other
+      // files had already collected.
+      let url: string | null;
+      try {
+        url = await imageUrl(context().file.path, data.src);
+      } catch (error) {
+        return fail(`cover '${data.src}': ${describeError(error)}`);
+      }
+      if (url == null) {
+        // Unreachable behind the regex above; TypeScript cannot know that.
+        return fail(REF_HELP);
+      }
+      try {
+        return { src: { src: url, ...(await measureImage(url)) }, alt: data.alt };
+      } catch (error) {
+        return fail(`could not fetch '${url}': ${describeError(error)}`);
+      }
     })
     .optional();
 
@@ -482,15 +684,6 @@ const work = defineCollection({
         ctx.addIssue({ code: "custom", message: identity, fatal: true });
         return s.NEVER;
       }
-      const noAlt = imagesWithoutAlt();
-      if (noAlt.length > 0) {
-        ctx.addIssue({
-          code: "custom",
-          fatal: true,
-          message: `image without alt text in the body: ${noAlt.join(", ")}`,
-        });
-        return s.NEVER;
-      }
       return {
         ...data,
         locale: identity.locale,
@@ -523,15 +716,6 @@ const log = defineCollection({
         ctx.addIssue({ code: "custom", message: identity, fatal: true });
         return s.NEVER;
       }
-      const noAlt = imagesWithoutAlt();
-      if (noAlt.length > 0) {
-        ctx.addIssue({
-          code: "custom",
-          fatal: true,
-          message: `image without alt text in the body: ${noAlt.join(", ")}`,
-        });
-        return s.NEVER;
-      }
       return {
         ...data,
         locale: identity.locale,
@@ -551,6 +735,18 @@ const site = defineCollection({
      * it carries — would stay traceable forever. Only the link lives here.
      */
     resumeUrl: s.string().url().startsWith("https://"),
+    /**
+     * Where the images live, for the same reason the CV does: binaries in a
+     * public, permanent history stay traceable forever. The bucket behind this
+     * URL mirrors the repository's structure minus the `img/` segment —
+     * `<assetsBaseUrl>/<type>/<key>/<file>` — and the build joins the pieces
+     * with `/`, which is why a trailing slash is rejected.
+     */
+    assetsBaseUrl: s
+      .string()
+      .url()
+      .startsWith("https://")
+      .regex(/[^/]$/, "no trailing slash — the build appends /<type>/<key>/<file>"),
   }),
 });
 
@@ -597,15 +793,12 @@ export default defineConfig({
   strict: true,
 
   output: {
-    // Everything stays INSIDE the checkout, relative to this file. The obvious
-    // alternative — pointing `assets` at the site's `public/`, one level up —
-    // creates and writes to a folder outside the repository: in the CI here that
-    // leaks into the runner's parent directory, and locally it litters the
-    // folder containing the clone.
-    //
-    // The content repository produces a self-contained bundle; who decides where
-    // the files live is the site, which copies `.velite/static` into its own
-    // `public/` before `next build`.
+    // Everything stays INSIDE the checkout, relative to this file. With the
+    // images on the CDN nothing lands in `assets` any more; the entry stays
+    // because the option needs a value, and because anything Velite ever does
+    // write must land inside this repository, never outside it — pointing at
+    // the site's `public/` would leak into the runner's parent directory in CI
+    // and litter the folder containing the clone locally.
     data: ".velite",
     assets: ".velite/static",
     base: "/static/",
@@ -695,6 +888,9 @@ export default defineConfig({
           date: doc.date,
           tags: doc.tags.map((tag) => tag.id),
           relatedWork: [...doc.relatedWork].sort(),
+          // The PRESENCE of the cover, same as work: one language with a card
+          // image and the other without is a difference visitors would see.
+          hasCover: doc.cover != null,
         });
       const base = group.find((doc) => doc.locale === DEFAULT_LOCALE);
       if (base == null) continue;
@@ -704,7 +900,7 @@ export default defineConfig({
           fingerprint(doc) !== fingerprint(base)
         ) {
           problems.push(
-            `${at("log", key, doc.locale)}: date/tags/relatedWork diverge from ${DEFAULT_LOCALE}.mdx`,
+            `${at("log", key, doc.locale)}: date/tags/relatedWork diverge from ${DEFAULT_LOCALE}.mdx, or one has a cover and the other does not`,
           );
         }
       }

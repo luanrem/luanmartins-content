@@ -60,7 +60,8 @@ The key is the **item's** identity, not the company's: three roles at the same
 employer are `exxonmobil-full-stack`, `exxonmobil-software-engineer` and
 `exxonmobil-trainee`.
 
-Assets belong next to the item they describe, inside its folder.
+Images are not committed; they live on a CDN, keyed by the same
+`<type>/<key>` structure — see [Images](#images).
 
 ## Content types
 
@@ -125,35 +126,44 @@ Notes. Routed at `/<locale>/log/<slug>`.
 
 ### `site.yml`
 
-`resumeUrl` — a link to the CV. The PDF is hosted **outside** this repository;
-see the ground rules below.
+Two URLs, both pointing outside this repository — see the ground rules below:
+
+- `resumeUrl` — a link to the CV PDF.
+- `assetsBaseUrl` — where the images live. Every image reference resolves
+  against it; see [Images](#images).
 
 ## Images
 
-**Images live in an `img/` folder inside the item, next to the text that uses
-them.** They are committed here like any other content — the repository stays
-self-contained, so a checkout is everything needed to rebuild the site.
+**Images are not committed here.** They live in an S3 bucket served from a
+CDN, and `assetsBaseUrl` in `site.yml` is the only place this repository knows
+about it. The bucket mirrors the repository's structure, minus the `img/`
+segment the reference carries:
 
 ```
-work/hermes/
-  en.mdx
-  pt.mdx
-  img/
-    architecture.png     ← referenced by both
+work/populatte/en.mdx  +  ./img/landing-hero.png
+                  ↓
+<assetsBaseUrl>/work/populatte/landing-hero.png
 ```
 
-Two ways to use one, and both take a **relative path**:
+The texts reference images by a **relative path**, exactly as if the files
+were still here — the CDN's hostname never appears in a `.mdx` file, so moving
+the images somewhere else is one line in `site.yml`, not an edit in every
+text.
 
-**In the body**, as ordinary markdown. The file is copied to the output, the URL
-is rewritten to a content-hashed public path, and the build measures the file and
-writes `width` and `height` onto the `<img>` — so the text around it does not
-jump when the image finishes loading:
+Two ways to use one:
+
+**In the body**, as ordinary markdown. The build rewrites the URL to the CDN
+one, downloads the file, and writes `width` and `height` onto the `<img>` — so
+the text around it does not jump when the image finishes loading:
 
 ```markdown
 ![Diagram of the four pipeline stages](./img/architecture.png)
 ```
 
-**As a cover**, in the frontmatter — for the card and for social previews:
+**As a cover**, in the frontmatter — for the card and for social previews. A
+cover produces width, height and a `blurDataURL` placeholder alongside the
+URL, so the site can render it without layout shift. Only the cover gets the
+blur, because a body image has nowhere to carry it:
 
 ```yaml
 cover:
@@ -161,13 +171,18 @@ cover:
   alt: Diagram of the four pipeline stages
 ```
 
-A cover produces width, height and a `blurDataURL` placeholder alongside the
-path, so the site can render it without layout shift. The same measurement runs
-on body images; only the cover gets the blur, because a body image has nowhere to
-carry it.
-
 Rules the build enforces:
 
+- **The reference is `./img/<file>`**, the name made of letters, digits, dots,
+  hyphens and underscores, starting with a letter or digit. Anything else — an
+  external URL, a deeper folder, a name that needs URL-encoding — fails the
+  build.
+- **Only inline markdown images.** A reference-style image (`![alt][fig]`) or
+  raw HTML media (`<img>`, `<video>`, …) would slip past the rewrite and ship
+  an unvalidated URL, so both fail the build instead.
+- **The file must be on the CDN when the build runs.** Every referenced image
+  is downloaded; a missing one fails the build with the URL in the message.
+  Upload **before** opening the PR — CI runs the same build.
 - **Alt text is required, everywhere.** An image in the body without alt text
   fails the build, and `cover.alt` is a required field. Accessibility is an
   acceptance criterion on the site, and a missing alt is only catchable here.
@@ -176,12 +191,16 @@ Rules the build enforces:
 - **Either both languages have a cover or neither does.** One card with an
   image and one without is a difference visitors would see.
 
-The same image referenced from several files is stored once — the output name
-is a hash of the contents.
+One rule the build cannot enforce: **never replace a file under its old
+name.** The CDN caches by name, and a changed file behind an unchanged name
+can keep serving the old bytes for days — with the stored `width`/`height`
+going stale along with them. A new version of an image is a new name
+(`landing-hero-v2.png`) and an updated reference in the text.
 
-The `img/` folder is a convention, not a rule the build enforces: paths are
-resolved relative to the `.mdx` file, so any subfolder works. Keeping it uniform
-is what makes an item's folder readable at a glance.
+The price of hosting the images outside: the build needs the network, and a
+checkout alone no longer carries them. In exchange the repository stays text —
+which is what it is for — and a missing or broken image is still caught before
+it ships, which is the guarantee that mattered.
 
 Everything generated lands in `.velite/`, which is git-ignored. Nothing is
 written outside this repository.
@@ -295,7 +314,9 @@ pnpm build    # the same gate CI runs
 - An `experience` body containing anything other than bullets
 - An image without alt text, in the body or as a cover
 - A cover present in one language of an item and missing in the other
-- A body image the build cannot measure — a missing file, or one that is not an
+- An image reference that is not `./img/<file>` — an external URL, say
+- A reference-style image (`![alt][fig]`) or raw HTML media in a body
+- An image the CDN does not have, or one whose bytes are not a measurable
   image
 - A code fence tagged with a language that does not exist
 - A heading whose text produces no anchor — one made only of emoji, say

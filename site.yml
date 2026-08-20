@@ -1,8 +1,13 @@
-# The one loose value the site needs that is not long-form text and cannot be
+# The loose values the site needs that are not long-form text and cannot be
 # hardcoded into a component.
 #
-# The CV PDF is hosted OUTSIDE this repository on purpose: here is public and Git
-# history is permanent, so any older version of the file — with whatever personal
-# data it carried — would stay traceable forever, even after being replaced. Only
-# the link lives here.
+# Both URLs exist for the same reason: this repository is public and Git
+# history is permanent, so anything binary or personal that ever lands in a
+# commit stays traceable forever, even after being replaced. The CV PDF and
+# the images are hosted OUTSIDE this repository; only the links live here.
 resumeUrl: "https://web-garage.softwaremartins.com/dl/Luan_Martins_Resume.pdf"
+
+# Where the images live. A text referencing ./img/<file> from <type>/<key>/
+# is served from <assetsBaseUrl>/<type>/<key>/<file>. Keep the double quotes
+# and no trailing slash — the build reads this line with a strict pattern.
+assetsBaseUrl: "https://cdn.luanmartins.com/portimg"

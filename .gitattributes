@@ -1,0 +1,4 @@
+# Everything here is text, and the build reads some of it with line-anchored
+# patterns (site.yml). LF everywhere keeps a CRLF checkout from turning into a
+# build failure that blames a correct-looking file.
+* text=auto eol=lf
