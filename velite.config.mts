@@ -888,6 +888,9 @@ export default defineConfig({
           date: doc.date,
           tags: doc.tags.map((tag) => tag.id),
           relatedWork: [...doc.relatedWork].sort(),
+          // The PRESENCE of the cover, same as work: one language with a card
+          // image and the other without is a difference visitors would see.
+          hasCover: doc.cover != null,
         });
       const base = group.find((doc) => doc.locale === DEFAULT_LOCALE);
       if (base == null) continue;
@@ -897,7 +900,7 @@ export default defineConfig({
           fingerprint(doc) !== fingerprint(base)
         ) {
           problems.push(
-            `${at("log", key, doc.locale)}: date/tags/relatedWork diverge from ${DEFAULT_LOCALE}.mdx`,
+            `${at("log", key, doc.locale)}: date/tags/relatedWork diverge from ${DEFAULT_LOCALE}.mdx, or one has a cover and the other does not`,
           );
         }
       }
