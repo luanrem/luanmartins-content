@@ -17,8 +17,8 @@ import {
   defineCollection,
   defineConfig,
   getImageMetadata,
-  isRelativePath,
   s,
+  type Image,
   type MarkdownOptions,
 } from "velite";
 import {
@@ -131,28 +131,155 @@ const imagesWithoutAlt = (): string[] => {
 };
 
 /* ---------------------------------------------------------------------------
+   IMAGES ON THE CDN
+
+   Images are not committed here. They live in the bucket behind `assetsBaseUrl`
+   (site.yml), keyed by the structure this repository already has, minus the
+   `img/` segment the reference carries:
+
+     work/populatte/en.mdx  +  ./img/landing-hero.png
+       →  <assetsBaseUrl>/work/populatte/landing-hero.png
+
+   The reference in the text stays RELATIVE on purpose: no `.mdx` file ever
+   carries the CDN's hostname, so moving the images is one line in site.yml,
+   not an edit in every text. The build resolves each reference, downloads the
+   file once, and fails loudly when the CDN does not have it — the same
+   missing-image guarantee the repository had while the files lived here.
+
+   Downloading is not only validation. `width`/`height` (and the cover's blur
+   placeholder) come out of the bytes, and nothing else can measure them once
+   the files are not in the checkout. The price is that the build now needs
+   the network — accepted: it runs in CI and on Vercel, which always have it,
+   and a CDN outage turns into a red build, never into a broken page.
+   --------------------------------------------------------------------------- */
+
+/** `<root>/<type>/<key>/<locale>.mdx` — the two folders above the file. */
+const itemPath = (
+  mdxPath: string,
+): { root: string; type: string; key: string } => {
+  const keyDir = dirname(mdxPath);
+  const typeDir = dirname(keyDir);
+  return { root: dirname(typeDir), type: basename(typeDir), key: basename(keyDir) };
+};
+
+/**
+ * `assetsBaseUrl` read straight from site.yml with a pattern, not a YAML
+ * parser: this config is compiled and run by whichever repository invokes it
+ * (this one and the site), and a YAML library would have to be a dependency of
+ * both. The pattern accepts exactly the shape the site collection's schema
+ * enforces — double quotes, https, no trailing slash — so the two readers can
+ * never disagree quietly: anything else fails loudly right here.
+ */
+const ASSETS_BASE_RE = /^assetsBaseUrl:\s*"(https:\/\/[^"\s]*[^"\s/])"[ \t]*$/m;
+
+const baseUrlByRoot = new Map<string, Promise<string>>();
+
+const assetsBaseUrl = (root: string): Promise<string> => {
+  let pending = baseUrlByRoot.get(root);
+  if (pending == null) {
+    pending = readFile(resolve(root, "site.yml"), "utf8").then((text) => {
+      const match = ASSETS_BASE_RE.exec(text);
+      if (match == null) {
+        throw new Error(
+          `site.yml needs assetsBaseUrl: "https://…" — double quotes, no trailing slash; every image resolves against it`,
+        );
+      }
+      return match[1];
+    });
+    baseUrlByRoot.set(root, pending);
+  }
+  return pending;
+};
+
+/**
+ * What a reference may look like: one `img/` folder, one file name, and only
+ * characters that survive being pasted into a URL verbatim — the bucket key
+ * must match the reference byte for byte.
+ */
+const IMG_REF_RE = /^\.\/img\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
+
+const REF_HELP =
+  "an image is referenced as ./img/<file> (letters, digits, dot, hyphen, underscore) and served from the CDN — see the README";
+
+/** The public URL a reference resolves to, or null when it is not a reference. */
+const imageUrl = async (
+  mdxPath: string,
+  ref: string,
+): Promise<string | null> => {
+  const name = IMG_REF_RE.exec(ref)?.[1];
+  if (name == null) return null;
+  const { root, type, key } = itemPath(mdxPath);
+  return `${await assetsBaseUrl(root)}/${type}/${key}/${name}`;
+};
+
+/** Everything `getImageMetadata` measures: dimensions plus the blur fields. */
+type RemoteImage = Omit<Image, "src">;
+
+const FETCH_ATTEMPTS = 3;
+
+/**
+ * GET rather than HEAD, because the bytes are the point. A 4xx is a file that
+ * was never uploaded and retrying cannot fix it; a 5xx or a network error gets
+ * two more tries, so a CDN hiccup does not fail a content PR.
+ */
+const fetchImage = async (url: string): Promise<Buffer> => {
+  let failure = "";
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      failure = (error as Error).message;
+      continue;
+    }
+    if (response.ok) return Buffer.from(await response.arrayBuffer());
+    failure = `the CDN answered ${response.status}`;
+    if (response.status < 500) break;
+  }
+  throw new Error(failure);
+};
+
+/**
+ * One download per URL per process, shared by the languages of an item and by
+ * the cover. The failure is cached too — in `velite dev`, a file uploaded
+ * after the first miss needs a restart to be seen.
+ */
+const measured = new Map<string, Promise<RemoteImage>>();
+
+const measureImage = (url: string): Promise<RemoteImage> => {
+  let pending = measured.get(url);
+  if (pending == null) {
+    pending = fetchImage(url).then(async (bytes) => {
+      const metadata = await getImageMetadata(bytes);
+      if (metadata == null) throw new Error("the file is not a measurable image");
+      return metadata;
+    });
+    measured.set(url, pending);
+  }
+  return pending;
+};
+
+/* ---------------------------------------------------------------------------
    THE BODY PIPELINE
 
    Three things the body needs that Velite does not do on its own, all handed to
    every `s.markdown()` through `markdownOptions`. None of them decides how
-   anything looks: one adds dimensions, one adds an anchor to every section, and
-   the last adds classes and CSS variable names. The site owns the appearance
-   (ADR-0001).
+   anything looks: one swaps every image reference for its CDN URL and adds
+   dimensions, one adds an anchor to every section, and the last adds classes
+   and CSS variable names. The site owns the appearance (ADR-0001).
    --------------------------------------------------------------------------- */
 
 /**
- * Writes `width` and `height` on every body image — the same measurement
- * `s.image()` already does for the cover, applied to the body, so the text does
- * not jump when the image finishes loading.
+ * Rewrites every body image to its CDN URL and writes `width` and `height` on
+ * it, so the text does not jump when the image finishes loading.
  *
  * It is a REMARK plugin on purpose. Velite pushes its `rehypeCopyLinkedFiles`
- * ahead of any rehype plugin we pass (verified in the 0.4.0 dist), so by the
- * time rehype runs the URL is already the hashed `/static/...` one and the file
- * on disk would have to be found again. Here the URL is still `./img/foo.png`,
- * relative to the `.mdx` being read. `rehypeCopyLinkedFiles` only rewrites
- * `src`, so the dimensions survive it untouched.
+ * ahead of any rehype plugin we pass (verified in the 0.4.0 dist), and that
+ * plugin treats a relative `src` as a local file to copy — a file this
+ * repository no longer has. Here the URL is still `./img/<file>`; by the time
+ * rehype runs it is absolute, and `rehypeCopyLinkedFiles` leaves it alone.
  */
-const remarkImageSize =
+const remarkImagesFromCdn =
   () =>
   async (tree: MdNode, file: { path?: string }): Promise<void> => {
     const images: MdNode[] = [];
@@ -162,26 +289,27 @@ const remarkImageSize =
     };
     walk(tree);
 
-    const from = dirname(file.path ?? ".");
+    const path = file.path ?? ".";
     await Promise.all(
       images.map(async (node) => {
-        const url = node.url ?? "";
-        // Same predicate `rehypeCopyLinkedFiles` uses to decide what it owns:
-        // an external URL is not ours to measure, and the schema forbids one.
-        if (!isRelativePath(url)) return;
-        // `./img/foo.png?v=2` and `#anchor` are the path plus noise.
-        const path = resolve(from, url.split(/[?#]/)[0]);
+        const ref = node.url ?? "";
+        const url = await imageUrl(path, ref);
+        if (url == null) {
+          // Loud rather than silent: an external URL is nobody's here to
+          // validate or measure, and a misshapen relative one would ship as a
+          // broken image nobody looks at once it is HTML.
+          throw new Error(`'${ref}' — ${REF_HELP}`);
+        }
         let width: number;
         let height: number;
         try {
-          const metadata = await getImageMetadata(await readFile(path));
-          if (metadata == null) throw new Error("no dimensions in the file");
-          ({ width, height } = metadata);
-        } catch (err) {
-          // Loud rather than silent: an unmeasurable image is a body that jumps
-          // on load, and nobody looks at it again once it is HTML.
-          throw new Error(`could not measure '${url}': ${(err as Error).message}`);
+          ({ width, height } = await measureImage(url));
+        } catch (error) {
+          throw new Error(
+            `could not fetch '${url}': ${(error as Error).message}`,
+          );
         }
+        node.url = url;
         node.data = { ...node.data, hProperties: { ...node.data?.hProperties, width, height } };
       }),
     );
@@ -291,7 +419,7 @@ const shikiOptions = {
 type RehypePlugin = NonNullable<MarkdownOptions["rehypePlugins"]>[number];
 
 const markdownOptions = {
-  remarkPlugins: [remarkImageSize],
+  remarkPlugins: [remarkImagesFromCdn],
   // Velite's .d.ts inlines unified's types instead of importing them, so the
   // `Plugin` @shikijs/rehype exports and the `Pluggable` Velite expects are two
   // identical declarations TypeScript refuses to unify. The cast bridges the two
@@ -308,19 +436,36 @@ const markdownOptions = {
    --------------------------------------------------------------------------- */
 
 /**
- * The item's cover. `s.image()` copies the file to the output and returns
- * dimensions plus the blur placeholder; `alt` is a separate, required field
- * because `s.image()` has nowhere to store alt text, and an image without alt
- * does not meet the site's accessibility criterion.
- *
- * The path is relative to the file itself — the image lives in the item's
- * `img/` folder.
+ * The item's cover. The reference is the same `./img/<file>` shape the body
+ * uses; the build resolves it against the CDN and returns the URL with
+ * dimensions plus the blur placeholder — the exact object `s.image()` used to
+ * produce, so the site keeps rendering it without layout shift. `alt` is a
+ * separate, required field because an image without alt does not meet the
+ * site's accessibility criterion.
  */
 const coverField = () =>
   s
     .object({
-      src: s.image(),
+      src: s.string().regex(IMG_REF_RE, REF_HELP),
       alt: s.string().min(3).max(160),
+    })
+    .transform(async (data, ctx) => {
+      const url = await imageUrl(context().file.path, data.src);
+      if (url == null) {
+        // Unreachable behind the regex above; TypeScript cannot know that.
+        ctx.addIssue({ code: "custom", message: REF_HELP, fatal: true });
+        return s.NEVER;
+      }
+      try {
+        return { src: { src: url, ...(await measureImage(url)) }, alt: data.alt };
+      } catch (error) {
+        ctx.addIssue({
+          code: "custom",
+          fatal: true,
+          message: `could not fetch '${url}': ${(error as Error).message}`,
+        });
+        return s.NEVER;
+      }
     })
     .optional();
 
@@ -609,15 +754,12 @@ export default defineConfig({
   strict: true,
 
   output: {
-    // Everything stays INSIDE the checkout, relative to this file. The obvious
-    // alternative — pointing `assets` at the site's `public/`, one level up —
-    // creates and writes to a folder outside the repository: in the CI here that
-    // leaks into the runner's parent directory, and locally it litters the
-    // folder containing the clone.
-    //
-    // The content repository produces a self-contained bundle; who decides where
-    // the files live is the site, which copies `.velite/static` into its own
-    // `public/` before `next build`.
+    // Everything stays INSIDE the checkout, relative to this file. With the
+    // images on the CDN nothing lands in `assets` any more; the entry stays
+    // because the option needs a value, and because anything Velite ever does
+    // write must land inside this repository, never outside it — pointing at
+    // the site's `public/` would leak into the runner's parent directory in CI
+    // and litter the folder containing the clone locally.
     data: ".velite",
     assets: ".velite/static",
     base: "/static/",
