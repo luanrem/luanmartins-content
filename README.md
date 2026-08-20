@@ -174,8 +174,12 @@ cover:
 Rules the build enforces:
 
 - **The reference is `./img/<file>`**, the name made of letters, digits, dots,
-  hyphens and underscores. Anything else — an external URL, a deeper folder, a
-  name that needs URL-encoding — fails the build.
+  hyphens and underscores, starting with a letter or digit. Anything else — an
+  external URL, a deeper folder, a name that needs URL-encoding — fails the
+  build.
+- **Only inline markdown images.** A reference-style image (`![alt][fig]`) or
+  raw HTML media (`<img>`, `<video>`, …) would slip past the rewrite and ship
+  an unvalidated URL, so both fail the build instead.
 - **The file must be on the CDN when the build runs.** Every referenced image
   is downloaded; a missing one fails the build with the URL in the message.
   Upload **before** opening the PR — CI runs the same build.
@@ -311,6 +315,7 @@ pnpm build    # the same gate CI runs
 - An image without alt text, in the body or as a cover
 - A cover present in one language of an item and missing in the other
 - An image reference that is not `./img/<file>` — an external URL, say
+- A reference-style image (`![alt][fig]`) or raw HTML media in a body
 - An image the CDN does not have, or one whose bytes are not a measurable
   image
 - A code fence tagged with a language that does not exist

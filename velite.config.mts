@@ -113,22 +113,11 @@ const readBullets = (): Bullets => {
   };
 };
 
-/**
- * Body images without alt text. Accessibility is an acceptance criterion in the
- * site's contract, and an image without alt can only be caught here — once it
- * becomes HTML, nobody looks again.
- */
-const imagesWithoutAlt = (): string[] => {
-  const walk = (node: MdNode): string[] => {
-    const here =
-      node.type === "image" && (node.alt ?? "").trim().length === 0
-        ? [node.url ?? "(sem url)"]
-        : [];
-    return [...here, ...(node.children ?? []).flatMap(walk)];
-  };
-  const root = context().file.mdast as unknown as MdNode | undefined;
-  return root == null ? [] : walk(root);
-};
+// The alt-text gate for body images does NOT live here on `context().file.mdast`
+// — that tree is a re-parse of the content without the GFM extensions, and an
+// image inside a footnote definition does not even exist in it (the line parses
+// as a childless `definition`). The gate lives in `remarkImagesFromCdn`, which
+// walks the tree that actually renders.
 
 /* ---------------------------------------------------------------------------
    IMAGES ON THE CDN
@@ -193,12 +182,16 @@ const assetsBaseUrl = async (root: string): Promise<string> => {
 /**
  * What a reference may look like: one `img/` folder, one file name, and only
  * characters that survive being pasted into a URL verbatim — the bucket key
- * must match the reference byte for byte.
+ * must match the reference byte for byte. The first character is a letter or
+ * digit, so a name cannot masquerade as a dotfile or an option.
  */
 const IMG_REF_RE = /^\.\/img\/([A-Za-z0-9][A-Za-z0-9._-]*)$/;
 
 const REF_HELP =
-  "an image is referenced as ./img/<file> (letters, digits, dot, hyphen, underscore) and served from the CDN — see the README";
+  "an image is referenced as ./img/<file> (letters, digits, dot, hyphen and underscore, starting with a letter or digit) and served from the CDN — see the README";
+
+/** Raw HTML that would carry media past the pipeline. */
+const MEDIA_TAG_RE = /<(?:img|picture|source|video|audio|iframe|embed|object)\b/i;
 
 /** The public URL a reference resolves to, or null when it is not a reference. */
 const imageUrl = async (
@@ -311,11 +304,42 @@ const remarkImagesFromCdn =
   () =>
   async (tree: MdNode, file: { path?: string }): Promise<void> => {
     const images: MdNode[] = [];
+    const problems: string[] = [];
     const walk = (node: MdNode): void => {
-      if (node.type === "image") images.push(node);
+      if (node.type === "image") {
+        // The alt gate lives here — on the tree that renders — because
+        // accessibility is an acceptance criterion on the site and once the
+        // body is HTML nobody looks again. (`context().file.mdast` cannot be
+        // trusted for this: it is re-parsed without GFM, and an image inside a
+        // footnote definition is absent from it.)
+        if ((node.alt ?? "").trim().length === 0) {
+          problems.push(`image without alt text: ${node.url ?? "(no url)"}`);
+        }
+        images.push(node);
+      }
+      // The two ways an image can dodge the rewrite, closed explicitly: a
+      // reference-style image resolves through a definition this plugin never
+      // touches, and raw HTML is opaque to remark — either one would ship an
+      // unvalidated, unmeasured URL past the one invariant this pipeline has.
+      if (node.type === "imageReference") {
+        problems.push(
+          `reference-style image '![${node.alt ?? ""}][…]' — use the inline form: ${REF_HELP}`,
+        );
+      }
+      if (node.type === "html" && MEDIA_TAG_RE.test(node.value ?? "")) {
+        problems.push(
+          `raw HTML media (<img>, <video>, …) is invisible to the image pipeline — use markdown image syntax: ${REF_HELP}`,
+        );
+      }
       for (const child of node.children ?? []) walk(child);
     };
     walk(tree);
+    // Everything wrong with the tree in one throw, before any download: the
+    // author sees the full list at once, and no bytes move for a file that is
+    // failing anyway.
+    if (problems.length > 0) {
+      throw new Error(problems.join("\n  "));
+    }
 
     const path = file.path ?? ".";
     await Promise.all(
@@ -660,15 +684,6 @@ const work = defineCollection({
         ctx.addIssue({ code: "custom", message: identity, fatal: true });
         return s.NEVER;
       }
-      const noAlt = imagesWithoutAlt();
-      if (noAlt.length > 0) {
-        ctx.addIssue({
-          code: "custom",
-          fatal: true,
-          message: `image without alt text in the body: ${noAlt.join(", ")}`,
-        });
-        return s.NEVER;
-      }
       return {
         ...data,
         locale: identity.locale,
@@ -699,15 +714,6 @@ const log = defineCollection({
       const identity = readIdentity();
       if (typeof identity === "string") {
         ctx.addIssue({ code: "custom", message: identity, fatal: true });
-        return s.NEVER;
-      }
-      const noAlt = imagesWithoutAlt();
-      if (noAlt.length > 0) {
-        ctx.addIssue({
-          code: "custom",
-          fatal: true,
-          message: `image without alt text in the body: ${noAlt.join(", ")}`,
-        });
         return s.NEVER;
       }
       return {
