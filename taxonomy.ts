@@ -60,8 +60,13 @@ export const STACK = [
   "gcp",
   "elasticsearch",
   "proxmox",
+  "truenas",
   "traefik",
   "tailscale",
+  // self-hosted services
+  "immich",
+  "plex",
+  "pihole",
   // other
   "chrome-extension",
 ] as const;
@@ -111,8 +116,12 @@ export const STACK_LABELS: Record<StackId, string> = {
   gcp: "Google Cloud",
   elasticsearch: "Elasticsearch",
   proxmox: "Proxmox",
+  truenas: "TrueNAS",
   traefik: "Traefik",
   tailscale: "Tailscale",
+  immich: "Immich",
+  plex: "Plex",
+  pihole: "Pi-hole",
   "chrome-extension": "Chrome Extension APIs",
 };
 

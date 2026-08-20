@@ -1,0 +1,100 @@
+---
+title: Homelab
+subtitle: O gabinete que virou servidor
+headline: "Um Xeon de 2016 comprado no AliExpress, um gabinete velho e peças de prateleira, rodando Proxmox com TrueNAS, Immich, Plex, Pi-hole e Kestra em cima."
+slug: homelab-infraestrutura
+kind: overview
+status:
+  text: Rodando sem mim
+  tone: live
+order: 2
+featured: true
+tags: [infrastructure, self-hosting, automation]
+stack: [proxmox, truenas, immich, plex, pihole, kestra, docker]
+updatedAt: 2026-08-20
+cover:
+  src: ./img/build-cover-v2.jpg
+  alt: Fotos das peças do servidor sobre um fundo de papel, com a placa-mãe X99 em destaque e uma ficha técnica listando Xeon E5-2680 v4 e Proxmox VE.
+---
+
+## Antes de tudo, um aviso
+
+Eu escrevi esse texto longe de casa. Estou viajando pela Europa como nômade digital e não tenho acesso à máquina agora, nem para conferir um número nem para tirar uma foto decente dela. O que está aqui é o que eu lembro de cabeça, e o resto eu completo quando voltar. As imagens são as fotos de anúncio das peças, porque foi o que deu para fazer daqui.
+
+## O que é
+
+Um gabinete montado peça por peça que virou o servidor da casa. Roda Proxmox, e em cima dele ficam o TrueNAS, o Immich, o Plex, o Pi-hole e o Kestra. Ele mora embaixo de tudo, ligado o tempo todo, e na maior parte dos dias eu esqueço que ele existe. Que é mais ou menos o elogio que dá para fazer a um servidor.
+
+## A compra que começou tudo
+
+Em 18 de setembro de 2023 eu comprei um kit no AliExpress: placa-mãe QIYIDA X99, soquete LGA2011-3, com um Xeon E5-2680 v4 e 32 GB de DDR4 em dois pentes de 16 GB. O link que eu tinha salvo não abre mais, que é o destino normal de um anúncio do AliExpress depois de dois anos.
+
+![Foto do anúncio do kit QIYIDA X99, com a placa-mãe, o Xeon E5-2680 v4 e dois pentes de memória DDR4, cobertos pelos dizeres em vermelho do anúncio.](./img/x99-kit.jpg)
+
+A conta que me convenceu na época foi simples. O E5-2680 v4 é um processador de servidor de 2016, com 14 núcleos e 28 threads, e em 2023 ele custava menos que um processador de entrada novo. Para uma máquina que ia passar a vida rodando várias coisas pequenas ao mesmo tempo, núcleo barato vale mais que núcleo rápido.
+
+O anúncio vende a memória como 3200 MHz, e vale marcar que isso é número do pente e não da máquina: o E5-2680 v4 é de 2016 e não passa de DDR4-2400. É o tipo de detalhe que some no meio de um título de anúncio de AliExpress com quinze vírgulas.
+
+O kit inteiro, placa-mãe mais processador mais os 32 GB de memória, saiu por R$ 503,34.
+
+![Captura do histórico de pedidos do AliExpress: o kit QIYIDA X99 com placa-mãe, processador e memória, concluído em 18 de setembro de 2023, no total de R$ 503,34.](./img/aliexpress-order.png)
+
+Escrevendo isso hoje, um pente avulso de 16 GB de DDR4 sozinho custa mais do que eu paguei no kit inteiro. Quer dizer que só a memória que veio dentro da caixa já vale mais que o dobro do que eu paguei em tudo, processador e placa-mãe de brinde. Não foi faro para investimento, foi sorte de ter comprado antes de memória virar artigo de luxo.
+
+## Só tinha uma porta M.2
+
+Coloquei um SSD NVMe de 256 GB para o sistema e quis expandir. Aí descobri o problema óbvio dessas placas: acabaram as portas. Comprei um adaptador de M.2 NVMe para PCI-e, dos que ocupam um slot x4 e entregam a linha inteira para o disco.
+
+![Placa adaptadora de M.2 NVMe para PCI-e, preta, com o dissipador dourado e o encaixe M.2 na ponta direita.](./img/nvme-pcie-adapter.jpg)
+
+É uma peça boba e resolve bem. A placa tem slot PCI-e sobrando justamente porque é uma plataforma de servidor, então trocar slot por porta de disco sai barato.
+
+## O resto veio da prateleira
+
+O gabinete é um Thermaltake antigo que eu já tinha, e o primeiro boot foi com uma fonte velha que estava sobrando. Hoje quem alimenta a máquina é uma MSI MAG A550BN, 550 W, 80 Plus Bronze, com PFC ativo.
+
+![Fonte MSI MAG A550BN vista de cima, preta com detalhes cinza e a ventoinha de 120 mm sob a grade.](./img/power-supply.jpg)
+
+O cooler é um Redragon TYR CC-9104B, 120 mm, PWM, quatro heat pipes, com LED azul que ninguém nunca vê porque a lateral do gabinete fica fechada. Ele é especificado para 130 W e o processador tem TDP de 120 W, então sobra pouco no papel.
+
+![Cooler Redragon TYR com ventoinha de LED azul, bloco de alumínio e quatro heat pipes de cobre aparecendo na base.](./img/cpu-cooler.jpg)
+
+## Uma placa de vídeo por causa do Plex
+
+A placa de vídeo entrou na lista por um motivo só, e o motivo era o Plex. Eu já sabia que queria rodar ele nessa máquina e parti do princípio de que precisaria de pelo menos alguma placa para dar conta do trabalho de vídeo. Comprei a mais barata que encontrei, uma AFOX Radeon R5 220 de 2 GB DDR3, 64 bits, low profile e passiva.
+
+![Placa de vídeo AFOX Radeon R5 220, low profile, com dissipador passivo preto e saídas VGA, DVI e HDMI.](./img/gpu.jpg)
+
+Fora essa função ela não faz mais nada. Depois que o Proxmox subiu, tudo passou a ser pelo navegador, e acho que ninguém ligou um monitor nessa máquina de novo desde a instalação. Se ela ajuda mesmo no que eu imaginava na hora de comprar, é uma das coisas que eu quero medir com calma quando voltar.
+
+## O HD que eu esperei para comprar
+
+Eu sempre quis ter um NAS em casa. A ideia nunca mudou: guardar tudo dentro da minha rede, no meu disco. As fotos antigas, os vídeos, o meu Google Drive e a minha Netflix, sem depender de assinatura e sem depender de alguém decidir mudar o preço ou tirar uma coisa do ar.
+
+O que segurou foi o preço. HD de NAS é caro, e é caro por um motivo: ele é feito para girar o dia inteiro, todo dia, coisa que um HD de desktop não promete. Então eu esperei. Num dia qualquer apareceu uma promoção e eu comprei na hora um Seagate IronWolf de 4 TB, SATA, 5400 RPM, 256 MB de cache.
+
+![HD Seagate IronWolf de 4 TB, 3,5 polegadas, com a etiqueta preta, verde e vermelha e o lobo estilizado.](./img/nas-drive.jpg)
+
+Foi a peça que virou a chave. Antes dela eu tinha uma máquina rodando serviços. Depois dela eu tinha onde colocar as coisas.
+
+## Em cima de tudo, o Proxmox
+
+Com a máquina montada, instalei o Proxmox e fui subindo serviço por serviço.
+
+![Diagrama do servidor: uma caixa do Proxmox VE com TrueNAS, Immich, Plex, Pi-hole e Kestra dentro, ligada a um NVMe de 256 GB para os discos das máquinas e a um IronWolf de 4 TB para os dados.](./img/services-v2.png)
+
+**TrueNAS.** É quem guarda os dados e serve o IronWolf para o resto da casa. Foi a parte que deu mais trabalho e também a que eu mais tenho certeza de ter feito direito, porque é o ponto onde tudo se encontra: as fotos do Immich, a biblioteca do Plex e os backups saem todos do mesmo lugar.
+
+**Immich.** O meu Google Fotos. O aplicativo no celular manda as fotos sozinho, e a partir dali elas estão em casa em vez de estarem no servidor de outra pessoa. É o serviço que mais justificou o projeto inteiro para quem mora comigo.
+
+**Plex.** A minha Netflix. Catálogo meu, sem assinatura e sem aquela história de a série sumir do ar no meio da temporada.
+
+**Pi-hole.** O mais fácil de todos, de longe. Tem tutorial em qualquer canto da internet, o passo a passo é curto e numa tarde está funcionando. Como ele filtra propaganda no DNS, vale para a casa inteira de uma vez, incluindo a TV e o celular de quem só veio visitar.
+
+**Kestra.** Os jobs agendados, e a parte que eu mais mexo. É onde ficam as automações que eu não quero rodando no meu notebook, justamente porque elas precisam acontecer mesmo com ele desligado.
+
+## O que ainda falta escrever
+
+Esse texto está incompleto de propósito. Faltam as versões exatas, como cada serviço está isolado, o que passa por VM e o que passa por container, como o TrueNAS está configurado por baixo e se a placa de vídeo faz pelo Plex o que eu imaginei que ela faria. Nada disso eu consigo conferir de onde eu estou, e eu prefiro deixar o buraco visível a preencher com chute.
+
+Quando eu voltar da viagem eu abro a máquina, tiro as fotos de verdade e atualizo isso aqui.
