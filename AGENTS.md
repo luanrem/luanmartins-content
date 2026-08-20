@@ -50,9 +50,13 @@ If one of them gets in the way, **stop and ask** — do not work around it.
 
 4. **Every image has alt text.** In the body and on the cover. It is an
    accessibility acceptance criterion on the site, and once it becomes HTML
-   nobody catches it any more. Images live in `<type>/<key>/img/`, referenced by
-   a relative path (`./img/file.png`) — never an external URL, or the repository
-   stops being able to rebuild the site on its own.
+   nobody catches it any more. Images are not committed: they live in the
+   bucket behind `assetsBaseUrl` (site.yml) under `<type>/<key>/<file>`, and
+   are referenced by a relative path (`./img/file.png`) — never a full URL.
+   Upload the file **before** opening the PR: the build downloads every
+   referenced image and fails on one the CDN does not have. And never replace
+   a file under its old name — the CDN caches by name; a new version of an
+   image is a new name (`file-v2.png`) and an updated reference.
 
 5. **Never merge.** A merge into `main` triggers a deploy of the site — that is a
    human step. An agent opens a PR and stops there.
