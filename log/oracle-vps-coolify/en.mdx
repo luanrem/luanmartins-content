@@ -1,0 +1,228 @@
+---
+title: "The $0/month VPS behind everything: Oracle Cloud and Coolify"
+description: "Why a free Oracle ARM VPS and Coolify, how I set it up from scratch, the firewall gotchas, and the plan B if Oracle disappears."
+slug: oracle-vps-with-coolify
+date: 2026-10-30
+tags: [self-hosting, infrastructure]
+---
+
+<!-- DRAFT. A file starting with _ stays out of the build. Before the PR: rename this one to en.mdx and _pt.mdx to pt.mdx, upload the images to the bucket and fix the date. -->
+
+In the [Hermes](/en/log/hermes-on-vps) post I left a promise: to write up how I created and configured the VPS it runs on. Four months have gone by, and the promise got more urgent, because Hermes isn't the only thing living there anymore. The same machine runs the memory it shares with Claude Code, the [Garage](/en/log/garage-s3-on-coolify) that serves the images on this log, and the API and database of a job listings monitor I wrote. If this VPS goes down, a good chunk of my personal projects goes down with it.
+
+This post is for anyone who has never set up a VPS. It's not a click-by-click tutorial: I learned my way around the console from [Tiago Matos](https://www.youtube.com/@tiagomatosweb), and he explains it better than I do. What I want to cover is the why behind each choice, what I did, the gotchas that cost me time, and what happens if Oracle decides it doesn't want to give me a free server anymore.
+
+## Why a VPS, if I have a homelab
+
+I have a [homelab running Proxmox](/en/work/homelab-infrastructure) at home. The natural question is why not run everything there. There were three reasons.
+
+**The VPS stays on when my house doesn't.** The power goes out, the internet goes out, the router freezes. Hermes runs cron jobs in the middle of the night and answers me on my phone, and an "always on" agent that depends on my home's circuit breaker isn't always on. I say that from my own experience running the homelab at home.
+
+**My home network stays closed.** To serve anything to the internet from home, I'd have to open a port on the router or set up a tunnel, and any configuration mistake exposes the network where my computer, my NAS and my photos live. On the VPS, the worst case is losing the VPS.
+
+**You learn cloud by messing with cloud.** The homelab taught me virtualization, storage and local networking. Security Lists, regions, account limits and billing only show up once you have an account with a real provider.
+
+## Why Oracle
+
+The obvious reason is the price: zero. Oracle has a tier called Always Free, which doesn't expire after the trial period. For ARM machines, the [documentation](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm) as of today lists 1,500 OCPU hours and 9,000 GB-hours of memory per month. That's the equivalent of 2 OCPUs and 12 GB running the whole month, plus 200 GB of disk and 10 TB of outbound traffic.
+
+My instance uses exactly that: 2 OCPUs, 12 GB of RAM and a disk of almost 200 GB, running Ubuntu 24.04 in the São Paulo region.
+
+That limit used to be double. Until June 2026 it was 4 OCPUs and 24 GB, and Oracle [cut it in half without announcing it](https://infoq.com/news/2026/07/oracle-cloud-free-tier-limits/). My instance is from June 19, days after the cut, so it started out under the new limit. That's the first warning: the tier is free, but the rules are Oracle's and they can change again. Use it at your own risk.
+
+The second warning is idleness. Oracle can reclaim idle Always Free instances: if CPU (at the 95th percentile), network and memory all stay below 20% for 7 days, the instance is considered idle. My account is Pay As You Go, which is the route the community recommends for getting out from under that rule. The documentation doesn't promise that exemption, so treat it as anecdote, not as a guarantee.
+
+In practice, Pay As You Go changed one thing: I had to put a card on file. I still pay $0, because everything I use fits inside the free limit, but now there's a way for a bill to show up. If having a card on file makes you uncomfortable, stay on the free account and accept the idleness risk.
+
+And the risk there's no way around: there's no SLA, no support and no failover. Nothing stops Oracle from changing the tier again or shutting down free accounts. My alarm today is whatever Oracle sends me, an email about a change to the tier or the bill on my card. That's not much, and I come back to it at the end. For a personal project, I accept it. For anything someone depends on, no.
+
+## Why Coolify
+
+Before landing on it, I looked at the others.
+
+I've used Portainer and Dockge. They manage containers and compose files really well, but they stop there: domains, certificates and updates are on you. Writing the compose file by hand is the most transparent route, and the one I'd recommend for learning, except every new service turns into an afternoon of proxy, DNS and certificates. Dokploy and CapRover are the same idea as Coolify, a deploy platform you host yourself. Dokploy is a lot newer, and CapRover is older, built on top of Docker Swarm.
+
+Coolify won for two reasons. The first is maturity: it looked to me like the project with the most miles on it and the most people using it, which in practice means more ready-made templates and more answers when something breaks. The second is backups: it saves its own database and the services' databases straight to an S3 bucket, configured from the dashboard. On top of that comes what I already covered in the Hermes post, a catalog of ready-to-run apps and Traefik in front, issuing the certificates on its own.
+
+It also has a price: Coolify wants to own the server. It installs Docker, brings up its own proxy on ports 80 and 443, and logs in as root, over SSH, to the machine it's running on. On a VPS dedicated to it, fine. On a machine shared with other things, that causes conflicts, and that's exactly what happened to me.
+
+## Step by step
+
+### 1. The account and the region
+
+The region you pick at signup becomes the account's home region. It can't be changed later, and the free resources live in it. Mine is São Paulo.
+
+### 2. The instance
+
+In the console, under Compute → Instances → Create instance, what matters is:
+
+- **Image:** Canonical Ubuntu 24.04 Minimal, in the `aarch64` variant, which is the ARM one.
+- **Shape:** `VM.Standard.A1.Flex`, which is ARM, with 2 OCPUs and 12 GB. The console has no preset for that: you type both values in by hand.
+- **Boot disk:** the default is 50 GB; you can raise it to close to the 200 GB limit.
+- **SSH key:** Oracle generates the key pair or takes your public key. I use my own. If you let Oracle generate it, download the private key right then, because it doesn't show up again.
+- **Public IP:** leave it checked.
+
+![Oracle's instance creation screen with the VM.Standard.A1.Flex shape, 2 OCPUs and 12 GB of memory](./img/oracle-shape.webp)
+
+Being ARM has one consequence: every service's Docker image needs an `arm64` build. Most have one, and when one doesn't, you find out at deploy time.
+
+### 3. The first login
+
+```bash
+ssh ubuntu@<public-ip>
+sudo apt update && sudo apt upgrade -y
+```
+
+The user is `ubuntu`, not `root`. If you try to log in as `root`, Oracle answers with a message asking you to log in as `ubuntu` and drops the connection after ten seconds. This will matter later on.
+
+### 4. The firewall
+
+On Oracle, inbound ports are opened outside the machine, in the Security List of the account's virtual network. Port 22 comes open already. I opened 80 and 443, so Coolify can serve the sites.
+
+I also opened 8000, the port for Coolify's dashboard, and that was a mistake I'll get to in a bit.
+
+Inside the machine there's a second firewall: Oracle's Ubuntu image ships with iptables rules that accept SSH and reject everything else. For Coolify's sites, I didn't need to touch it. I did, and what I learned from that is in the gotchas.
+
+### 5. Coolify
+
+The install is one command:
+
+```bash
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
+```
+
+The script runs nine steps, and on my machine it took about two minutes. Three of them matter: it installs Docker if it isn't there yet, checks that SSH accepts root login with a key, and creates an SSH key of its own, which it puts in root's `authorized_keys`. That key is how Coolify, from inside its container, manages the machine it's on.
+
+Remember the message telling you to log in as `ubuntu`? It's still there, on a line in root's `authorized_keys`. The script doesn't delete that line: it adds its own key on a new line, without the restriction. When I went back over the server for this post, I thought that key was one I'd created for something else. It wasn't: the installer did it, on its own.
+
+Once the script finishes, the dashboard is at `http://<public-ip>:8000`. There you create the admin account, point a domain at the IP with an A record in DNS, and set that domain as the dashboard's address. Traefik issues the certificate and, from then on, access is over HTTPS.
+
+That's how I did it, and 8000 stayed open to the internet. Today I'd do that first access through an SSH tunnel:
+
+```bash
+ssh -L 8000:localhost:8000 ubuntu@<public-ip>
+```
+
+With the tunnel open, just go to `http://localhost:8000` in the browser. It brings the server's port to your computer, and 8000 never has to appear in the Security List.
+
+![Coolify's dashboard with the server and the projects running](./img/coolify-dashboard.webp)
+
+## The gotchas
+
+### The tutorial's ufw
+
+Generic VPS tutorials tell you to install ufw and configure the firewall through it. I installed it and took it out. On Oracle, the machine's firewall already comes set up directly in iptables, and ufw lands on top of those rules instead of living alongside them. The recommendation I found was not to use it, and I followed it: on Oracle's image, leave the machine's firewall the way it came and open the ports in the Security List.
+
+```bash
+sudo apt purge ufw -y
+```
+
+### nginx on port 80
+
+The same tutorial installed nginx. Coolify brings up its own Traefik on ports 80 and 443, and a port only has one owner. Before running the script, I removed nginx and checked that 80 was free:
+
+```bash
+sudo systemctl stop nginx
+sudo systemctl disable nginx
+sudo apt purge nginx nginx-common nginx-core -y
+sudo ss -tlnp | grep ':80'
+```
+
+If the last command returns nothing, the port is free.
+
+### The iptables rules that did nothing
+
+Thinking I had to open the ports inside the machine too, I created iptables rules for 80, 443 and 8000:
+
+```bash
+sudo iptables -L INPUT -n -v --line-number
+sudo iptables -I INPUT 5 -p tcp --dport 80 -m state --state NEW -j ACCEPT
+sudo netfilter-persistent save
+```
+
+I got even that wrong. The first ones ended up at the bottom of the list, after the `REJECT`. iptables reads top to bottom and stops at the first rule that matches, so they existed, showed up in the listing and did nothing. I deleted them and inserted them again with `-I INPUT 5`, before the `REJECT`.
+
+Four months later, going over the server to write this post, I found out they made no difference even in the right position. In the counters, the 8000 rule was sitting at zero packets since the last reboot, five weeks earlier:
+
+```text
+num   pkts bytes target  prot  ...  destination
+6        0     0 ACCEPT  6     ...  tcp dpt:8000 state NEW
+```
+
+Even so, from the outside, `http://<public-ip>:8000` answered with Coolify's login screen.
+
+The reason is that when Docker publishes a container's port, it diverts the traffic before it reaches the `INPUT` chain, where my rules are. The packet goes through the `FORWARD` chain, which Docker controls. For a container port, what decides what gets in from outside is the Security List. And in the Security List 8000 was open, because I opened it.
+
+The result was the server's admin dashboard, with a login and password, answering over plain HTTP, with no certificate, to anyone who scanned my IP.
+
+I fixed it by closing 8000 in the Security List. The dashboard is still reachable through the domain, over HTTPS, because Traefik talks to Coolify inside the Docker network. And through Tailscale too, which I get to next.
+
+![Ingress rules in Oracle's Security List, with ports 22, 80 and 443 and without 8000](./img/security-list.webp)
+
+Port 22 is different: SSH runs directly on the machine, outside Docker, so for that one iptables does apply. The rule already comes in Oracle's image, and Coolify depends on it, because SSH is how it manages the host from inside the container.
+
+<!-- DECIDE: close 22 in the Security List now that SSH goes through Tailscale? -->
+
+## Keeping it up
+
+### Access through Tailscale
+
+Tailscale arrived in October. With it, the VPS becomes one more machine on my private network, and SSH goes through the tunnel, authenticated by my account, without depending on a key in `authorized_keys`.
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --ssh --hostname=vps-oracle --accept-dns=false
+```
+
+The `--ssh` turns on Tailscale's own SSH, and the `--accept-dns=false` leaves the VPS's DNS as it is.
+
+Coolify's API now only accepts the tailnet too: in the API's allowed IPs setting, it's `100.64.0.0/10`, Tailscale's address range. Before that, it accepted requests from anywhere, protected only by the token.
+
+### Updates
+
+Coolify updates itself, once a day, when a new version is out. Since June, that's been more than twenty updates.
+
+Ubuntu updates itself too, and one of those updates was Docker itself. Updating Docker restarts every container, and that's what happened one afternoon in October. Everything came back on its own, because each service's state lives in a volume and Coolify brings everything up with a restart policy.
+
+Traefik, the proxy in front of everything, I update by hand: I change the image tag on the proxy screen and restart. Before that, I copy the file where the certificates live:
+
+```bash
+sudo cp /data/coolify/proxy/acme.json /data/coolify/proxy/acme.json.bak-$(date +%F)
+```
+
+If the new proxy comes up broken, the certificates for every domain are saved.
+
+## What if Oracle disappears?
+
+It's the question I ask myself most about this VPS. The short answer: I'd lose a weekend and Hermes's state, but not the rest.
+
+Coolify backs up its own database daily to an S3 bucket outside Oracle, keeping 30 copies. That database holds the configuration for everything: projects, services, domains and environment variables. The services with important state go to S3 too: the agents' memory, every week, and Garage. Hermes, not yet. Its volume is 8 GB, most of it rebuildable, and the proper backup is left for January.
+
+One detail almost slipped past me: the database backup alone doesn't restore everything. Coolify encrypts the variables and the keys with the `APP_KEY`, which sits in the instance's `.env`. Without it, the database comes back, but the secrets don't open.
+
+<!-- TODO Luan: store the APP_KEY in 1Password before publishing. -->
+Mine sits in a password manager, off the VPS.
+
+So the plan B is another VPS at another provider, a fresh Coolify, the database restored from S3 with the `APP_KEY`, and DNS pointing at the new IP.
+
+Now, the honest part: I've never tested this. A backup that has never been restored is a plan, not a guarantee. The test, along with how the backup is set up, is for the next post.
+
+## What I'd do on day 1
+
+**Don't open 8000.** First access through the SSH tunnel and, right after, the domain with HTTPS.
+
+**Remember that Docker goes around iptables.** For a container port, the Security List is what protects it. And check from the outside, with a `curl` from another machine, instead of trusting the listing.
+
+**Tailscale from the start.** It arrived in October, but it could have arrived in June.
+
+**Backups and the `APP_KEY` in the first week.** The backup only arrived almost four months later.
+
+**A budget alert on Oracle.** Today, my billing warning is the bill on my card. A 1-dollar budget with an alert would warn me sooner.
+
+## Was it worth it
+
+Four months later, and with $0 spent, the VPS holds Hermes, its memory, my S3 and a project with a database, using 4 of its 11 GB of memory.
+
+It's not production, and I wouldn't put anything on it that someone depends on. But for learning infrastructure without paying for it, it's still the best deal I know.
+
+Two posts are left in the queue: the backup, with the restore test I still owe, and the day all of Hermes's MCPs stopped after an update.
